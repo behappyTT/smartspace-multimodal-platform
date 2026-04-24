@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能空间多模态数据感知平台</title>
+    <link rel="stylesheet" href="/static/style.css?v=20260418-wt901-layout-4">
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+</head>
+<body>
+    <!-- 页面整体容器 -->
+    <div class="page">
+        <!-- 顶部说明区域，突出项目名称 -->
+        <header class="hero">
+            <div>
+                <p class="eyebrow">本科毕业设计 </p>
+                <h1>智能空间多模态数据感知平台</h1>
+                <p class="subtitle">统一接入摄像头、树莓派环境采集节点和 WT901 蓝牙采集节点，演示标准化温湿度、加速度与角速度数据接入、存储与可视化。</p>
+            </div>
+        </header>
+
+        <!-- 仪表盘主体区域 -->
+        <main class="dashboard">
+            <!-- 摄像头视频区域 -->
+            <section class="panel video-panel">
+                <div class="panel-header">
+                    <h2>摄像头实时画面</h2>
+                    <span>本地 USB 摄像头</span>
+                </div>
+                <img class="video-frame" src="/video_feed" alt="摄像头实时画面">
+            </section>
+
+            <!-- 当前最新温湿度展示区域 -->
+            <section class="panel metric-panel">
+                <div class="panel-header">
+                    <h2>当前环境数据</h2>
+                    <span id="device-name">等待加载设备...</span>
+                </div>
+                <div class="metric-grid">
+                    <div class="metric-card">
+                        <p>当前温度</p>
+                        <h3 id="temperature-value">--</h3>
+                        <small id="temperature-time">暂无数据</small>
+                    </div>
+                    <div class="metric-card">
+                        <p>当前湿度</p>
+                        <h3 id="humidity-value">--</h3>
+                        <small id="humidity-time">暂无数据</small>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 历史折线图区域 -->
+            <section class="panel chart-panel">
+                <div class="panel-header">
+                    <h2>温湿度历史折线图</h2>
+                    <span>默认展示最近 24 小时</span>
+                </div>
+                <div id="history-chart"></div>
+            </section>
+
+            <!-- 蓝牙运动信息展示区域 -->
+            <section class="panel motion-panel">
+                <div class="panel-header">
+                    <h2>WT901 实时运动信息</h2>
+                    <span id="motion-device-name">蓝牙采集节点</span>
+                </div>
+                <div class="motion-grid">
+                    <div class="motion-card motion-card-left">
+                        <h3>加速度 ACC (g)</h3>
+                        <div class="motion-axis-list">
+                            <div class="motion-axis-item">
+                                <span class="motion-axis-label">X 轴</span>
+                                <strong id="acc-x-value">--</strong>
+                            </div>
+                            <div class="motion-axis-item">
+                                <span class="motion-axis-label">Y 轴</span>
+                                <strong id="acc-y-value">--</strong>
+                            </div>
+                            <div class="motion-axis-item">
+                                <span class="motion-axis-label">Z 轴</span>
+                                <strong id="acc-z-value">--</strong>
+                            </div>
+                        </div>
+                        <small class="motion-time" id="acc-time">暂无数据</small>
+                    </div>
+                    <div class="motion-card motion-card-right">
+                        <h3>角速度 GYR (deg/s)</h3>
+                        <div class="motion-axis-list">
+                            <div class="motion-axis-item">
+                                <span class="motion-axis-label">X 轴</span>
+                                <strong id="gyr-x-value">--</strong>
+                            </div>
+                            <div class="motion-axis-item">
+                                <span class="motion-axis-label">Y 轴</span>
+                                <strong id="gyr-y-value">--</strong>
+                            </div>
+                            <div class="motion-axis-item">
+                                <span class="motion-axis-label">Z 轴</span>
+                                <strong id="gyr-z-value">--</strong>
+                            </div>
+                        </div>
+                        <small class="motion-time" id="gyr-time">暂无数据</small>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        // 初始化 ECharts 图表实例。
+        const chart = echarts.init(document.getElementById("history-chart"));
+
+        function formatMetric(metric) {
+            // 当后端暂时没有返回数据时，前端显示占位符。
+            if (!metric || metric.value === null || metric.value === undefined) {
+                return "--";
+            }
+            return `${metric.value.toFixed(1)} ${metric.unit}`;
+        }
+
+        function formatTime(timestamp) {
+            // 把后端返回的 ISO 时间格式化为中文本地时间。
+            if (!timestamp) {
+                return "暂无数据";
+            }
+            return new Date(timestamp).toLocaleString("zh-CN", {
+                hour12: false,
+                year: "numeric",
+                month: "numeric",
+                day: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+                fractionalSecondDigits: 3,
+            });
+        }
+
+        function updateLatest(latestData) {
+            // 解析最新接口返回值并更新温湿度卡片。
+            const hasRealtimeData = latestData.metrics?.some(item => item.value !== null && item.value !== undefined);
+            if (!latestData.device_name) {
+                document.getElementById("device-name").textContent = "暂无传感器设备";
+            } else if (!hasRealtimeData) {
+                document.getElementById("device-name").textContent = `${latestData.device_name}（暂无实时数据）`;
+            } else {
+                document.getElementById("device-name").textContent = latestData.device_name;
+            }
+            const temperature = latestData.metrics.find(item => item.sensor_type === "temperature");
+            const humidity = latestData.metrics.find(item => item.sensor_type === "humidity");
+
+            document.getElementById("temperature-value").textContent = formatMetric(temperature);
+            document.getElementById("temperature-time").textContent = formatTime(temperature?.timestamp);
+            document.getElementById("humidity-value").textContent = formatMetric(humidity);
+            document.getElementById("humidity-time").textContent = formatTime(humidity?.timestamp);
+        }
+
+        function formatAxisValue(metric) {
+            // 蓝牙运动信息使用更紧凑的数字格式。
+            if (!metric || metric.value === null || metric.value === undefined) {
+                return "--";
+            }
+            return metric.value.toFixed(3);
+        }
+
+        function updateMotion(motionData) {
+            // 更新 WT901 蓝牙节点的加速度和角速度信息。
+            const hasRealtimeData = motionData.metrics?.some(item => item.value !== null && item.value !== undefined);
+            if (!motionData.device_name) {
+                document.getElementById("motion-device-name").textContent = "蓝牙采集节点（未接入）";
+            } else if (!hasRealtimeData) {
+                document.getElementById("motion-device-name").textContent = `${motionData.device_name}（暂无实时数据）`;
+            } else {
+                document.getElementById("motion-device-name").textContent = motionData.device_name;
+            }
+
+            const metricMap = Object.fromEntries((motionData.metrics || []).map(item => [item.sensor_type, item]));
+            document.getElementById("acc-x-value").textContent = formatAxisValue(metricMap.acceleration_x);
+            document.getElementById("acc-y-value").textContent = formatAxisValue(metricMap.acceleration_y);
+            document.getElementById("acc-z-value").textContent = formatAxisValue(metricMap.acceleration_z);
+            document.getElementById("gyr-x-value").textContent = formatAxisValue(metricMap.angular_velocity_x);
+            document.getElementById("gyr-y-value").textContent = formatAxisValue(metricMap.angular_velocity_y);
+            document.getElementById("gyr-z-value").textContent = formatAxisValue(metricMap.angular_velocity_z);
+
+            const accTime = metricMap.acceleration_x?.timestamp || metricMap.acceleration_y?.timestamp || metricMap.acceleration_z?.timestamp;
+            const gyrTime = metricMap.angular_velocity_x?.timestamp || metricMap.angular_velocity_y?.timestamp || metricMap.angular_velocity_z?.timestamp;
+            document.getElementById("acc-time").textContent = formatTime(accTime);
+            document.getElementById("gyr-time").textContent = formatTime(gyrTime);
+        }
+
+        function updateChart(historyData) {
+            // 从后端历史数据中拆出温度和湿度两条曲线。
+            const temperatureSeries = historyData.series.find(item => item.sensor_type === "temperature");
+            const humiditySeries = historyData.series.find(item => item.sensor_type === "humidity");
+            const temperaturePoints = temperatureSeries?.points || [];
+            const humidityPoints = humiditySeries?.points || [];
+            const hasHistoryData = temperaturePoints.length > 0 || humidityPoints.length > 0;
+
+            // 默认以其中一条曲线的时间序列作为横轴。
+            const xAxis = (temperaturePoints.length > 0 ? temperaturePoints : humidityPoints).map(
+                point => new Date(point.timestamp).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
+            );
+
+            // 配置双 Y 轴折线图，左侧显示温度，右侧显示湿度。
+            chart.setOption({
+                tooltip: {
+                    trigger: "axis"
+                },
+                legend: {
+                    data: ["温度", "湿度"]
+                },
+                grid: {
+                    left: 48,
+                    right: 24,
+                    top: 56,
+                    bottom: 36
+                },
+                xAxis: {
+                    type: "category",
+                    data: xAxis
+                },
+                yAxis: [
+                    {
+                        type: "value",
+                        name: "温度 (C)"
+                    },
+                    {
+                        type: "value",
+                        name: "湿度 (%)"
+                    }
+                ],
+                series: [
+                    {
+                        name: "温度",
+                        type: "line",
+                        smooth: true,
+                        data: temperaturePoints.map(point => point.value),
+                        yAxisIndex: 0
+                    },
+                    {
+                        name: "湿度",
+                        type: "line",
+                        smooth: true,
+                        data: humidityPoints.map(point => point.value),
+                        yAxisIndex: 1
+                    }
+                ],
+                graphic: hasHistoryData ? [] : [
+                    {
+                        type: "text",
+                        left: "center",
+                        top: "middle",
+                        style: {
+                            text: "暂无历史温湿度数据",
+                            fill: "#6b7280",
+                            font: "16px Microsoft YaHei"
+                        }
+                    }
+                ]
+            });
+        }
+
+        async function refreshEnvironmentDashboard() {
+            try {
+                // 环境数据和历史图刷新频率不需要太高，避免频繁重绘图表。
+                const [latestResponse, historyResponse] = await Promise.all([
+                    fetch("/dashboard/latest"),
+                    fetch("/sensor-data/history?hours=24")
+                ]);
+                const latestData = await latestResponse.json();
+                const historyData = await historyResponse.json();
+                updateLatest(latestData);
+                updateChart(historyData);
+            } catch (error) {
+                console.error("刷新环境仪表盘失败", error);
+            }
+        }
+
+        async function refreshMotionDashboard() {
+            try {
+                // 蓝牙运动数据变化更快，因此单独提高刷新频率。
+                const motionResponse = await fetch("/dashboard/latest-motion");
+                const motionData = await motionResponse.json();
+                updateMotion(motionData);
+            } catch (error) {
+                console.error("刷新蓝牙运动信息失败", error);
+            }
+        }
+
+        // 页面加载后立即请求一次数据。
+        refreshEnvironmentDashboard();
+        refreshMotionDashboard();
+        // 温湿度和历史图每 5 秒刷新一次。
+        setInterval(refreshEnvironmentDashboard, 5000);
+        // WT901 蓝牙运动信息每 100ms 刷新一次，对齐 10Hz 展示节奏。
+        setInterval(refreshMotionDashboard, 100);
+        // 窗口尺寸变化时同步调整图表大小。
+        window.addEventListener("resize", () => chart.resize());
+    </script>
+</body>
+</html>

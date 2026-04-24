@@ -1,0 +1,243 @@
+:root {
+    /* 页面主色变量，后续调整风格时可以集中修改。 */
+    --bg: #eef3f9;
+    --panel: #ffffff;
+    --text: #1f2937;
+    --muted: #6b7280;
+    --primary: #146c94;
+    --accent: #1aa179;
+    --shadow: 0 18px 45px rgba(31, 41, 55, 0.12);
+    --radius: 22px;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    /* 使用渐变背景，让页面更适合作为展示型毕设仪表盘。 */
+    margin: 0;
+    font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+    color: var(--text);
+    background:
+        radial-gradient(circle at top left, rgba(20, 108, 148, 0.16), transparent 28%),
+        linear-gradient(135deg, #f7fbff 0%, #eef3f9 50%, #dde7f2 100%);
+}
+
+.page {
+    /* 控制页面最大宽度和左右留白。 */
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 32px 20px 48px;
+}
+
+.hero {
+    /* 顶部标题区采用左右分栏布局。 */
+    display: flex;
+    justify-content: space-between;
+    gap: 24px;
+    align-items: flex-start;
+    margin-bottom: 24px;
+}
+
+.eyebrow {
+    /* 小标题用于突出“本科毕业设计”信息。 */
+    margin: 0 0 8px;
+    color: var(--primary);
+    font-weight: 700;
+    letter-spacing: 0.08em;
+}
+
+.hero h1 {
+    margin: 0;
+    font-size: 40px;
+    line-height: 1.15;
+}
+
+.subtitle {
+    max-width: 820px;
+    color: var(--muted);
+    line-height: 1.7;
+}
+
+.badge {
+    /* 技术栈标签。 */
+    padding: 12px 16px;
+    border-radius: 999px;
+    background: rgba(20, 108, 148, 0.1);
+    color: var(--primary);
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.dashboard {
+    /* 桌面端采用双列布局：左视频，右指标。 */
+    display: grid;
+    grid-template-columns: 1.15fr 0.85fr;
+    gap: 24px;
+}
+
+.panel {
+    /* 所有卡片面板共用样式。 */
+    background: var(--panel);
+    border-radius: var(--radius);
+    padding: 22px;
+    box-shadow: var(--shadow);
+}
+
+.video-panel,
+.chart-panel,
+.motion-panel {
+    grid-column: span 1;
+}
+
+.chart-panel,
+.motion-panel {
+    /* 历史图跨整行展示，保证横向空间充足。 */
+    grid-column: 1 / -1;
+}
+
+.panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.panel-header h2 {
+    margin: 0;
+    font-size: 22px;
+}
+
+.panel-header span {
+    color: var(--muted);
+    font-size: 14px;
+}
+
+.video-frame {
+    /* 视频区域保持较大展示面积，便于演示。 */
+    display: block;
+    width: 100%;
+    min-height: 360px;
+    object-fit: cover;
+    border-radius: 18px;
+    background: #dbe4ee;
+}
+
+.metric-grid {
+    /* 温湿度卡片采用纵向网格排列。 */
+    display: grid;
+    gap: 18px;
+}
+
+.metric-card {
+    /* 指标卡片采用轻渐变背景，提升仪表盘层次感。 */
+    padding: 24px;
+    border-radius: 18px;
+    background: linear-gradient(135deg, rgba(20, 108, 148, 0.08), rgba(26, 161, 121, 0.12));
+}
+
+.metric-card p,
+.metric-card small {
+    margin: 0;
+    color: var(--muted);
+}
+
+.metric-card h3 {
+    margin: 12px 0 8px;
+    font-size: 36px;
+    color: var(--primary);
+}
+
+#history-chart {
+    /* 固定图表高度，避免数据刷新时抖动。 */
+    width: 100%;
+    height: 420px;
+}
+
+.motion-grid {
+    /* 蓝牙运动信息区域左右严格对半显示，并用虚线分隔。 */
+    display: flex;
+    align-items: stretch;
+    height: 420px;
+    width: 100%;
+}
+
+.motion-card {
+    flex: 1 1 50%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    padding: 28px 32px;
+    background: linear-gradient(135deg, rgba(20, 108, 148, 0.05), rgba(26, 161, 121, 0.08));
+}
+
+.motion-card-left {
+    border-right: 2px dashed rgba(20, 108, 148, 0.22);
+}
+
+.motion-card h3 {
+    margin: 0 0 24px;
+    font-size: 26px;
+    color: var(--primary);
+}
+
+.motion-axis-list {
+    display: grid;
+    gap: 18px;
+    width: 100%;
+    max-width: 240px;
+}
+
+.motion-axis-item {
+    display: grid;
+    gap: 8px;
+    justify-items: center;
+}
+
+.motion-axis-label {
+    color: var(--muted);
+    font-size: 18px;
+}
+
+.motion-axis-item strong {
+    color: var(--text);
+    font-size: 32px;
+    font-weight: 700;
+}
+
+.motion-time {
+    margin-top: 18px;
+    color: var(--muted);
+    font-size: 15px;
+}
+
+@media (max-width: 900px) {
+    /* 移动端切换为单列布局，保证页面可演示。 */
+    .hero,
+    .dashboard {
+        grid-template-columns: 1fr;
+        display: grid;
+    }
+
+    .hero {
+        gap: 16px;
+    }
+
+    .hero h1 {
+        font-size: 32px;
+    }
+
+    .motion-grid {
+        flex-direction: column;
+        height: auto;
+    }
+
+    .motion-card-left {
+        border-right: none;
+        border-bottom: 2px dashed rgba(20, 108, 148, 0.22);
+    }
+}

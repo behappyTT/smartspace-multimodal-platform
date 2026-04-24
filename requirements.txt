@@ -1,0 +1,20 @@
+# FastAPI Web 框架，用于实现后端接口和页面服务
+fastapi==0.115.12
+# ASGI 服务器，用于运行 FastAPI 应用
+uvicorn==0.34.1
+# ORM 框架，用于定义模型和操作 SQLite 数据库
+sqlalchemy==2.0.40
+# 数据校验与序列化，用于定义请求体和响应体
+pydantic==2.11.3
+# 模板引擎，用于渲染前端 HTML 页面
+jinja2==3.1.6
+# 计算机视觉库，用于读取本地 USB 摄像头
+opencv-python==4.11.0.86
+# HTTP 请求库，用于树莓派上传脚本向后端发送数据
+requests==2.32.3
+# MQTT 客户端库，用于树莓派发布数据和后端订阅数据
+paho-mqtt==1.6.1
+# 蓝牙 BLE 客户端库，用于连接 WT901SDCL-BT50 采集加速度和角速度
+bleak==0.22.3
+# OpenCV 依赖，用于图像矩阵处理
+numpy==2.2.5

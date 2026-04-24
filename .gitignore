@@ -1,0 +1,24 @@
+# Python virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# IDE files
+.idea/
+
+# Runtime data generated during local demos
+runtime_data/
+
+# Local database files
+*.db
+*.db-journal
+
+# Local generated media / exports
+*.log
+*.zip
+
+# OS files
+.DS_Store
+Thumbs.db
