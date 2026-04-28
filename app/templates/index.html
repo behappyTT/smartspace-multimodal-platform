@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>智能空间多模态数据感知平台</title>
-    <link rel="stylesheet" href="/static/style.css?v=20260418-wt901-layout-4">
+    <title>面向智能空间的多模态感知数据采集系统和分析平台</title>
+    <link rel="stylesheet" href="/static/style.css?v=20260427-env-analysis-1">
     <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 </head>
 <body>
@@ -14,23 +14,78 @@
         <header class="hero">
             <div>
                 <p class="eyebrow">本科毕业设计 </p>
-                <h1>智能空间多模态数据感知平台</h1>
-                <p class="subtitle">统一接入摄像头、树莓派环境采集节点和 WT901 蓝牙采集节点，演示标准化温湿度、加速度与角速度数据接入、存储与可视化。</p>
+                <h1>面向智能空间的多模态感知数据采集系统和分析平台</h1>
+                <p class="subtitle">统一接入摄像头、树莓派环境采集节点和 WT901 蓝牙采集节点，演示多源环境数据、加速度与角速度数据接入、存储、回溯与分析。</p>
             </div>
+            <aside class="dataset-tools" aria-label="数据查询与导出">
+                <div class="dataset-tools-header">
+                    <strong>数据集导出</strong>
+                    <span id="dataset-export-status">选择时间范围</span>
+                </div>
+                <label>
+                    开始时间
+                    <input id="dataset-start-time" type="datetime-local" step="60">
+                </label>
+                <label>
+                    结束时间
+                    <input id="dataset-end-time" type="datetime-local" step="60">
+                </label>
+                <label>
+                    设备类型
+                    <select id="dataset-device-type">
+                        <option value="">全部设备</option>
+                        <option value="sensor_node">环境节点</option>
+                        <option value="bluetooth_node">蓝牙节点</option>
+                        <option value="camera">摄像头</option>
+                    </select>
+                </label>
+                <div class="dataset-actions">
+                    <button type="button" id="dataset-query-button">查询</button>
+                    <button type="button" id="dataset-export-button">导出 ZIP</button>
+                </div>
+            </aside>
         </header>
 
         <!-- 仪表盘主体区域 -->
         <main class="dashboard">
+            <!-- 历史回溯时间轴 -->
+            <section class="panel playback-panel">
+                <div class="playback-header">
+                    <div>
+                        <h2>历史回溯时间轴</h2>
+                        <span id="playback-status">实时模式</span>
+                    </div>
+                    <div class="playback-actions">
+                        <label class="playback-window-picker">
+                            回溯小时段
+                            <input id="playback-window-time" type="datetime-local" step="3600">
+                        </label>
+                        <button type="button" id="playback-window-button">跳转小时段</button>
+                        <button type="button" id="playback-toggle-button">▶ 继续回放</button>
+                        <button type="button" id="playback-live-button">回到实时</button>
+                    </div>
+                </div>
+                <div class="timeline-bar-wrap">
+                    <input id="playback-slider" type="range" min="0" max="3600" step="0.1" value="3600">
+                </div>
+                <div class="timeline-labels">
+                    <span id="playback-start-label">--</span>
+                    <strong id="playback-current-label">--</strong>
+                    <span id="playback-end-label">--</span>
+                </div>
+            </section>
+
             <!-- 摄像头视频区域 -->
             <section class="panel video-panel">
                 <div class="panel-header">
                     <h2>摄像头实时画面</h2>
-                    <span>本地 USB 摄像头</span>
+                    <span id="camera-status">本地 USB 摄像头</span>
                 </div>
-                <img class="video-frame" src="/video_feed" alt="摄像头实时画面">
+                <img class="video-frame" id="camera-frame" src="/video_feed" alt="摄像头实时画面">
+                <video class="video-frame" id="camera-video" controls muted playsinline hidden></video>
             </section>
 
-            <!-- 当前最新温湿度展示区域 -->
+            <!-- 当前最新环境数据展示区域 -->
             <section class="panel metric-panel">
                 <div class="panel-header">
                     <h2>当前环境数据</h2>
@@ -47,6 +102,26 @@
                         <h3 id="humidity-value">--</h3>
                         <small id="humidity-time">暂无数据</small>
                     </div>
+                    <div class="metric-card">
+                        <p>大气压强</p>
+                        <h3 id="pressure-value">--</h3>
+                        <small id="pressure-time">暂无数据</small>
+                    </div>
+                    <div class="metric-card">
+                        <p>海拔高度</p>
+                        <h3 id="altitude-value">--</h3>
+                        <small id="altitude-time">暂无数据</small>
+                    </div>
+                    <div class="metric-card">
+                        <p>紫外线强度</p>
+                        <h3 id="ultraviolet-value">--</h3>
+                        <small id="ultraviolet-time">暂无数据</small>
+                    </div>
+                    <div class="metric-card">
+                        <p>环境光强度</p>
+                        <h3 id="illuminance-value">--</h3>
+                        <small id="illuminance-time">暂无数据</small>
+                    </div>
                 </div>
             </section>
 
@@ -54,7 +129,13 @@
             <section class="panel chart-panel">
                 <div class="panel-header">
                     <h2>温湿度历史折线图</h2>
-                    <span>默认展示最近 24 小时</span>
+                    <label class="chart-range-picker">
+                        展示范围
+                        <select id="history-range-select">
+                            <option value="24">最近 24 小时</option>
+                            <option value="1">最近 1 小时</option>
+                        </select>
+                    </label>
                 </div>
                 <div id="history-chart"></div>
             </section>
@@ -104,19 +185,74 @@
                     </div>
                 </div>
             </section>
+
+            <!-- 空间环境状态分析区域 -->
+            <section class="panel analysis-panel">
+                <div class="panel-header">
+                    <h2>空间环境状态分析</h2>
+                    <span id="analysis-generated-at">等待环境数据...</span>
+                </div>
+                <div class="analysis-layout">
+                    <div class="analysis-score-card">
+                        <p>综合评分</p>
+                        <strong id="analysis-score">--</strong>
+                        <span id="analysis-level">暂无数据</span>
+                    </div>
+                    <div class="analysis-main">
+                        <div class="analysis-summary" id="analysis-summary">等待树莓派节点上传环境数据后生成分析结论。</div>
+                        <div class="analysis-tags">
+                            <span id="exercise-suitable-tag">运动适宜性：待判断</span>
+                            <span id="environment-data-tag">指标覆盖：0 / 6</span>
+                        </div>
+                    </div>
+                    <div class="analysis-list-card">
+                        <h3>关键判断</h3>
+                        <ul id="analysis-findings">
+                            <li>暂无环境指标</li>
+                        </ul>
+                    </div>
+                    <div class="analysis-list-card">
+                        <h3>调整建议</h3>
+                        <ul id="analysis-suggestions">
+                            <li>等待数据接入</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
         </main>
     </div>
 
     <script>
         // 初始化 ECharts 图表实例。
         const chart = echarts.init(document.getElementById("history-chart"));
+        let playbackMode = false;
+        let playbackStartTime = new Date(Date.now() - 60 * 60 * 1000);
+        let playbackEndTime = new Date();
+        let playbackRequestTimer = null;
+        let playbackPlayTimer = null;
+        let playbackEnvironmentTimer = null;
+        let playbackMotionTimer = null;
+        let playbackPlaying = false;
+        let playbackLoading = false;
+        let playbackSensorsLoading = false;
+        const PLAYBACK_STEP_SECONDS = 0.1;
+        const PLAYBACK_TICK_MS = 100;
+        const ENV_METRIC_CONFIG = {
+            temperature: { valueId: "temperature-value", timeId: "temperature-time", digits: 2 },
+            humidity: { valueId: "humidity-value", timeId: "humidity-time", digits: 2 },
+            pressure: { valueId: "pressure-value", timeId: "pressure-time", digits: 2 },
+            altitude: { valueId: "altitude-value", timeId: "altitude-time", digits: 2 },
+            ultraviolet: { valueId: "ultraviolet-value", timeId: "ultraviolet-time", digits: 4 },
+            illuminance: { valueId: "illuminance-value", timeId: "illuminance-time", digits: 2 },
+        };
 
         function formatMetric(metric) {
             // 当后端暂时没有返回数据时，前端显示占位符。
             if (!metric || metric.value === null || metric.value === undefined) {
                 return "--";
             }
-            return `${metric.value.toFixed(1)} ${metric.unit}`;
+            const digits = ENV_METRIC_CONFIG[metric.sensor_type]?.digits ?? 2;
+            return `${Number(metric.value).toFixed(digits)} ${metric.unit}`;
         }
 
         function formatTime(timestamp) {
@@ -136,8 +272,220 @@
             });
         }
 
+        function toLocalDateTimeInputValue(date) {
+            // datetime-local 需要本地时间字符串；这里先抵消时区偏移，再截取到分钟。
+            const offset = date.getTimezoneOffset();
+            const localDate = new Date(date.getTime() - offset * 60 * 1000);
+            return localDate.toISOString().slice(0, 16);
+        }
+
+        function parseMinuteInputValue(value) {
+            // 导出功能按分钟粒度处理，秒和毫秒统一归零，避免出现“看起来选到分钟但实际带秒”的情况。
+            const date = new Date(value);
+            date.setSeconds(0, 0);
+            return date;
+        }
+
+        function buildDatasetParams() {
+            // 查询和导出共用同一套参数构造逻辑，保证两个按钮的时间范围完全一致。
+            const startValue = document.getElementById("dataset-start-time").value;
+            const endValue = document.getElementById("dataset-end-time").value;
+            const deviceType = document.getElementById("dataset-device-type").value;
+            if (!startValue || !endValue) {
+                throw new Error("请先选择开始时间和结束时间");
+            }
+
+            const startDate = parseMinuteInputValue(startValue);
+            const endDate = parseMinuteInputValue(endValue);
+            if (endDate < startDate) {
+                throw new Error("结束时间需要晚于开始时间");
+            }
+
+            const params = new URLSearchParams({
+                start_time: startDate.toISOString(),
+                end_time: endDate.toISOString(),
+            });
+            if (deviceType) {
+                params.set("device_type", deviceType);
+            }
+            return params;
+        }
+
+        function setDatasetStatus(message) {
+            document.getElementById("dataset-export-status").textContent = message;
+        }
+
+        function formatTimelineLabel(date) {
+            return date.toLocaleTimeString("zh-CN", {
+                hour12: false,
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+            });
+        }
+
+        function getPlaybackTargetTime() {
+            // slider 的值表示距离开始时间的秒数，由此换算出当前回溯目标时刻。
+            const slider = document.getElementById("playback-slider");
+            return new Date(playbackStartTime.getTime() + Number(slider.value) * 1000);
+        }
+
+        function updatePlaybackLabels(targetTime = getPlaybackTargetTime()) {
+            // 时间轴左右两端固定显示回溯窗口边界，中间显示用户当前拖动到的时间点。
+            document.getElementById("playback-start-label").textContent = formatTimelineLabel(playbackStartTime);
+            document.getElementById("playback-current-label").textContent = formatTimelineLabel(targetTime);
+            document.getElementById("playback-end-label").textContent = formatTimelineLabel(playbackEndTime);
+        }
+
+        function setPlaybackWindow(startTime, endTime, sliderValue = 0) {
+            const slider = document.getElementById("playback-slider");
+            playbackStartTime = startTime;
+            playbackEndTime = endTime;
+            slider.min = "0";
+            slider.max = String(Math.floor((playbackEndTime - playbackStartTime) / 1000));
+            slider.value = String(Math.min(Math.max(sliderValue, 0), Number(slider.max)));
+            updatePlaybackLabels(getPlaybackTargetTime());
+        }
+
+        function getHourWindow(date = new Date()) {
+            const startTime = normalizeToHourStart(date);
+            const endTime = new Date(startTime.getTime() + 60 * 60 * 1000);
+            return { startTime, endTime };
+        }
+
+        function normalizeToHourStart(date) {
+            const normalized = new Date(date);
+            normalized.setMinutes(0, 0, 0);
+            return normalized;
+        }
+
+        function updateRealtimeTimeline() {
+            if (playbackMode) {
+                return;
+            }
+            const now = new Date();
+            const { startTime, endTime } = getHourWindow(now);
+            const elapsedSeconds = Math.floor((now - startTime) / 1000);
+            setPlaybackWindow(startTime, endTime, elapsedSeconds);
+            document.getElementById("playback-window-time").value = toLocalDateTimeInputValue(startTime);
+            setPlaybackStatus("实时模式");
+        }
+
+        function initializePlaybackTimeline() {
+            // 实时模式固定展示“当前整点到下一整点”的一小时段。
+            updateRealtimeTimeline();
+        }
+
+        function jumpToPlaybackHourWindow() {
+            const value = document.getElementById("playback-window-time").value;
+            if (!value) {
+                setPlaybackStatus("请先选择回溯小时段");
+                return;
+            }
+            stopPlaybackAutoRun();
+            playbackMode = true;
+            setPlaybackToggleLabel();
+            const startTime = normalizeToHourStart(new Date(value));
+            const endTime = new Date(startTime.getTime() + 60 * 60 * 1000);
+            setPlaybackWindow(startTime, endTime, 0);
+            loadPlaybackState();
+        }
+
+        function setPlaybackStatus(message) {
+            document.getElementById("playback-status").textContent = message;
+        }
+
+        function setPlaybackToggleLabel() {
+            const button = document.getElementById("playback-toggle-button");
+            button.textContent = playbackPlaying ? "⏸ 暂停回放" : "▶ 继续回放";
+            button.disabled = !playbackMode;
+        }
+
+        function buildCameraPlaceholder(text) {
+            const svg = `
+                <svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">
+                    <rect width="960" height="540" fill="#dbe4ee"/>
+                    <text x="480" y="270" text-anchor="middle" dominant-baseline="middle"
+                          fill="#146c94" font-size="34" font-family="Microsoft YaHei, sans-serif">${text}</text>
+                </svg>
+            `;
+            return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+        }
+
+        function showCameraImage(src, statusText) {
+            const frame = document.getElementById("camera-frame");
+            const video = document.getElementById("camera-video");
+            video.pause();
+            video.hidden = true;
+            video.removeAttribute("src");
+            video.dataset.segmentKey = "";
+            video.load();
+            frame.hidden = false;
+            frame.src = src;
+            document.getElementById("camera-status").textContent = statusText;
+        }
+
+        function showPlaybackVideo(cameraVideo, targetTime) {
+            const frame = document.getElementById("camera-frame");
+            const video = document.getElementById("camera-video");
+            video.pause();
+            video.hidden = true;
+            video.removeAttribute("src");
+            video.load();
+
+            const endpoint = playbackPlaying ? "video_feed" : "video_frame";
+            frame.hidden = false;
+            frame.src = `/timeline/${endpoint}?timestamp=${encodeURIComponent(targetTime)}&cache=${Date.now()}`;
+            updateCameraPlaybackStatus(targetTime);
+        }
+
+        function updateCameraPlaybackStatus(targetTime) {
+            document.getElementById("camera-status").textContent = `历史视频：${formatTime(targetTime)}`;
+        }
+
+        function initializeDatasetControls() {
+            const now = new Date();
+            const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+            document.getElementById("dataset-start-time").value = toLocalDateTimeInputValue(oneHourAgo);
+            document.getElementById("dataset-end-time").value = toLocalDateTimeInputValue(now);
+            document.getElementById("dataset-start-time").step = "60";
+            document.getElementById("dataset-end-time").step = "60";
+        }
+
+        async function queryDatasetSummary() {
+            try {
+                // 查询只返回数量和预览，不触发下载，适合先确认时间范围是否选对。
+                setDatasetStatus("查询中...");
+                const params = buildDatasetParams();
+                const response = await fetch(`/dataset/query?${params.toString()}`);
+                if (!response.ok) {
+                    throw new Error(await response.text());
+                }
+                const result = await response.json();
+                const startText = document.getElementById("dataset-start-time").value.replace("T", " ");
+                const endText = document.getElementById("dataset-end-time").value.replace("T", " ");
+                setDatasetStatus(`${startText} 至 ${endText}：传感器 ${result.sensor_data_count} 条，文件 ${result.object_index_count} 个`);
+            } catch (error) {
+                console.error("查询数据集失败", error);
+                setDatasetStatus(error.message || "查询失败");
+            }
+        }
+
+        async function exportAlignedDataset() {
+            try {
+                // 导出接口直接返回 ZIP 文件，浏览器会按普通下载流程处理。
+                setDatasetStatus("打包中...");
+                const params = buildDatasetParams();
+                window.location.href = `/dataset/export?${params.toString()}`;
+                setDatasetStatus("已开始下载");
+            } catch (error) {
+                console.error("导出数据集失败", error);
+                setDatasetStatus(error.message || "导出失败");
+            }
+        }
+
         function updateLatest(latestData) {
-            // 解析最新接口返回值并更新温湿度卡片。
+            // 解析最新接口返回值并更新六类环境指标卡片。
             const hasRealtimeData = latestData.metrics?.some(item => item.value !== null && item.value !== undefined);
             if (!latestData.device_name) {
                 document.getElementById("device-name").textContent = "暂无传感器设备";
@@ -146,13 +494,180 @@
             } else {
                 document.getElementById("device-name").textContent = latestData.device_name;
             }
-            const temperature = latestData.metrics.find(item => item.sensor_type === "temperature");
-            const humidity = latestData.metrics.find(item => item.sensor_type === "humidity");
+            const metricMap = Object.fromEntries((latestData.metrics || []).map(item => [item.sensor_type, item]));
+            Object.entries(ENV_METRIC_CONFIG).forEach(([sensorType, config]) => {
+                const metric = metricMap[sensorType];
+                document.getElementById(config.valueId).textContent = formatMetric(metric);
+                document.getElementById(config.timeId).textContent = formatTime(metric?.timestamp);
+            });
+        }
 
-            document.getElementById("temperature-value").textContent = formatMetric(temperature);
-            document.getElementById("temperature-time").textContent = formatTime(temperature?.timestamp);
-            document.getElementById("humidity-value").textContent = formatMetric(humidity);
-            document.getElementById("humidity-time").textContent = formatTime(humidity?.timestamp);
+        function valueFromMetricMap(metricMap, sensorType) {
+            const value = metricMap[sensorType]?.value;
+            return value === null || value === undefined ? null : Number(value);
+        }
+
+        function gradeEnvironmentScore(score) {
+            if (score >= 85) {
+                return ["良好", "当前空间环境整体较舒适，适合正常学习、展示或轻量活动。"];
+            }
+            if (score >= 70) {
+                return ["基本适宜", "当前空间环境可接受，但存在少量需要关注的指标。"];
+            }
+            if (score >= 55) {
+                return ["需要关注", "当前空间环境存在明显不适因素，建议适当调整后再进行长时间活动。"];
+            }
+            return ["不适宜", "当前空间环境不太适合持续停留或运动，建议优先改善环境条件。"];
+        }
+
+        function boundedPenalty(value, ideal, tolerance, weight, maxPenalty) {
+            // 连续扣分：超过舒适缓冲区后，偏离越大扣分越多。
+            const deviation = Math.max(Math.abs(value - ideal) - tolerance, 0);
+            return Math.min(deviation * weight, maxPenalty);
+        }
+
+        function analyzeEnvironmentMetrics(metrics) {
+            // 回溯模式复用前端规则，让分析结论与当前时间轴位置保持一致。
+            const metricMap = Object.fromEntries((metrics || []).map(item => [item.sensor_type, item]));
+            const temperature = valueFromMetricMap(metricMap, "temperature");
+            const humidity = valueFromMetricMap(metricMap, "humidity");
+            const pressure = valueFromMetricMap(metricMap, "pressure");
+            const altitude = valueFromMetricMap(metricMap, "altitude");
+            const ultraviolet = valueFromMetricMap(metricMap, "ultraviolet");
+            const illuminance = valueFromMetricMap(metricMap, "illuminance");
+            let score = 100;
+            const findings = [];
+            const suggestions = [];
+
+            if (temperature === null) {
+                score -= 18;
+                findings.push("温度数据暂未上报");
+            } else {
+                score -= boundedPenalty(temperature, 23, 1.0, 2.4, 24);
+                if (temperature < 16) {
+                    findings.push("温度偏低");
+                    suggestions.push("可适当提高室内温度，避免长时间静坐受凉");
+                } else if (temperature > 30) {
+                    findings.push("温度偏高");
+                    suggestions.push("建议通风或降温，不宜进行高强度运动");
+                } else if (temperature > 26) {
+                    findings.push("温度略高");
+                    suggestions.push("如需运动，建议控制强度并注意补水");
+                } else {
+                    findings.push("温度处于较舒适范围");
+                }
+            }
+
+            if (humidity === null) {
+                score -= 16;
+                findings.push("湿度数据暂未上报");
+            } else {
+                score -= boundedPenalty(humidity, 50, 5.0, 0.65, 18);
+                if (humidity < 35) {
+                    findings.push("空气偏干");
+                    suggestions.push("可适当补水或增加空气湿度");
+                } else if (humidity > 75) {
+                    findings.push("湿度偏高");
+                    suggestions.push("建议加强通风，避免闷热感");
+                } else if (humidity >= 40 && humidity <= 65) {
+                    findings.push("湿度处于较舒适范围");
+                } else {
+                    findings.push("湿度基本可接受");
+                }
+            }
+
+            if (pressure === null) {
+                score -= 4;
+                findings.push("气压数据暂未上报");
+            } else {
+                score -= boundedPenalty(pressure, 1013.25, 8.0, 0.18, 8);
+                if (pressure < 950 || pressure > 1050) {
+                    findings.push("气压偏离常见室内范围");
+                } else {
+                    findings.push("气压处于常见室内范围");
+                }
+            }
+
+            if (illuminance === null) {
+                score -= 4;
+                findings.push("环境光数据暂未上报");
+            } else if (illuminance < 100) {
+                score -= Math.min((300 - illuminance) / 25, 10);
+                findings.push("环境光偏暗");
+                suggestions.push("建议增加照明，提升展示或阅读可见性");
+            } else if (illuminance > 1200) {
+                score -= Math.min((illuminance - 1200) / 300, 8);
+                findings.push("环境光较强");
+                suggestions.push("如画面过曝，可调整摄像头朝向或降低强光直射");
+            } else {
+                score -= Math.min(Math.abs(illuminance - 500) / 500, 3);
+                findings.push("环境光强度适中");
+            }
+
+            if (ultraviolet === null) {
+                score -= 4;
+                findings.push("紫外线数据暂未上报");
+            } else {
+                score -= Math.min(Math.max(ultraviolet, 0) * 18, 12);
+                if (ultraviolet > 0.4) {
+                    findings.push("紫外线强度偏高");
+                    suggestions.push("建议减少强光直射，必要时采取遮挡或防护措施");
+                } else {
+                    findings.push("紫外线强度较低");
+                }
+            }
+
+            if (altitude !== null) {
+                findings.push(`海拔估算约 ${altitude.toFixed(2)} m`);
+            }
+            if (suggestions.length === 0) {
+                suggestions.push("当前无需明显干预，可继续观察环境变化趋势");
+            }
+
+            score = Math.round(Math.max(0, Math.min(100, score)) * 10) / 10;
+            const [level, summary] = gradeEnvironmentScore(score);
+            const exerciseSuitable = (
+                temperature !== null
+                && humidity !== null
+                && temperature >= 16
+                && temperature <= 28
+                && humidity >= 30
+                && humidity <= 70
+                && (ultraviolet === null || ultraviolet <= 0.4)
+            );
+            return {
+                generated_at: new Date().toISOString(),
+                score,
+                level,
+                summary,
+                exercise_suitable: exerciseSuitable,
+                findings: findings.slice(0, 6),
+                suggestions: suggestions.slice(0, 4),
+            };
+        }
+
+        function renderList(elementId, items) {
+            const element = document.getElementById(elementId);
+            element.innerHTML = "";
+            (items.length ? items : ["暂无可用结论"]).forEach(item => {
+                const li = document.createElement("li");
+                li.textContent = item;
+                element.appendChild(li);
+            });
+        }
+
+        function updateEnvironmentAnalysisFromPayload(payload) {
+            const analysis = payload.analysis || analyzeEnvironmentMetrics(payload.metrics || []);
+            const metrics = payload.metrics || [];
+            const availableCount = metrics.filter(item => item.value !== null && item.value !== undefined).length;
+            document.getElementById("analysis-score").textContent = analysis.score === null || analysis.score === undefined ? "--" : Number(analysis.score).toFixed(1);
+            document.getElementById("analysis-level").textContent = analysis.level || "暂无数据";
+            document.getElementById("analysis-summary").textContent = analysis.summary || "等待环境数据接入后生成分析结论。";
+            document.getElementById("exercise-suitable-tag").textContent = `运动适宜性：${analysis.exercise_suitable ? "适合轻中度活动" : "建议谨慎活动"}`;
+            document.getElementById("environment-data-tag").textContent = `指标覆盖：${availableCount} / ${Object.keys(ENV_METRIC_CONFIG).length}`;
+            document.getElementById("analysis-generated-at").textContent = analysis.generated_at ? `分析时间：${formatTime(analysis.generated_at)}` : "等待环境数据...";
+            renderList("analysis-findings", analysis.findings || []);
+            renderList("analysis-suggestions", analysis.suggestions || []);
         }
 
         function formatAxisValue(metric) {
@@ -261,22 +776,32 @@
         }
 
         async function refreshEnvironmentDashboard() {
+            if (playbackMode) {
+                return;
+            }
             try {
                 // 环境数据和历史图刷新频率不需要太高，避免频繁重绘图表。
-                const [latestResponse, historyResponse] = await Promise.all([
+                const historyHours = document.getElementById("history-range-select").value;
+                const [latestResponse, historyResponse, analysisResponse] = await Promise.all([
                     fetch("/dashboard/latest"),
-                    fetch("/sensor-data/history?hours=24")
+                    fetch(`/sensor-data/history?hours=${historyHours}`),
+                    fetch("/analysis/environment")
                 ]);
                 const latestData = await latestResponse.json();
                 const historyData = await historyResponse.json();
+                const analysisData = await analysisResponse.json();
                 updateLatest(latestData);
                 updateChart(historyData);
+                updateEnvironmentAnalysisFromPayload(analysisData);
             } catch (error) {
                 console.error("刷新环境仪表盘失败", error);
             }
         }
 
         async function refreshMotionDashboard() {
+            if (playbackMode) {
+                return;
+            }
             try {
                 // 蓝牙运动数据变化更快，因此单独提高刷新频率。
                 const motionResponse = await fetch("/dashboard/latest-motion");
@@ -287,13 +812,164 @@
             }
         }
 
+        async function loadPlaybackState() {
+            if (playbackLoading) {
+                return;
+            }
+            playbackLoading = true;
+            // 回溯模式下，环境、运动和摄像头抓拍都以同一个目标时间进行查询。
+            const targetTime = getPlaybackTargetTime();
+            updatePlaybackLabels(targetTime);
+            playbackMode = true;
+            setPlaybackStatus("回溯模式：加载中...");
+
+            try {
+                const params = new URLSearchParams({ timestamp: targetTime.toISOString() });
+                const response = await fetch(`/timeline/state?${params.toString()}`);
+                if (!response.ok) {
+                    throw new Error(await response.text());
+                }
+                const state = await response.json();
+                updateLatest(state.environment);
+                updateMotion(state.motion);
+                updateEnvironmentAnalysisFromPayload({
+                    metrics: state.environment.metrics,
+                    analysis: analyzeEnvironmentMetrics(state.environment.metrics),
+                });
+
+                if (state.camera_video?.available) {
+                    showPlaybackVideo(state.camera_video, state.target_time);
+                } else {
+                    showCameraImage(buildCameraPlaceholder("该时间附近暂无历史视频片段"), "该时间附近暂无历史视频片段");
+                }
+                setPlaybackStatus(`回溯模式：${formatTime(state.target_time)}`);
+            } catch (error) {
+                console.error("加载历史回溯状态失败", error);
+                setPlaybackStatus("回溯加载失败");
+            } finally {
+                playbackLoading = false;
+            }
+        }
+
+        async function loadPlaybackSensors() {
+            if (!playbackMode || playbackSensorsLoading) {
+                return;
+            }
+            playbackSensorsLoading = true;
+            const targetTime = getPlaybackTargetTime();
+            updatePlaybackLabels(targetTime);
+            try {
+                const params = new URLSearchParams({ timestamp: targetTime.toISOString() });
+                const response = await fetch(`/timeline/sensors?${params.toString()}`);
+                if (!response.ok) {
+                    throw new Error(await response.text());
+                }
+                const state = await response.json();
+                updateLatest(state.environment);
+                updateMotion(state.motion);
+                updateEnvironmentAnalysisFromPayload({
+                    metrics: state.environment.metrics,
+                    analysis: analyzeEnvironmentMetrics(state.environment.metrics),
+                });
+                if (playbackPlaying) {
+                    setPlaybackStatus(`回溯播放：${formatTime(state.target_time)}`);
+                }
+            } catch (error) {
+                console.error("加载历史传感器状态失败", error);
+            } finally {
+                playbackSensorsLoading = false;
+            }
+        }
+
+        function schedulePlaybackStateLoad() {
+            // 拖动滑块会连续触发 input，轻微防抖可以减少后端查询压力。
+            stopPlaybackAutoRun();
+            playbackMode = true;
+            setPlaybackToggleLabel();
+            window.clearTimeout(playbackRequestTimer);
+            playbackRequestTimer = window.setTimeout(loadPlaybackState, 180);
+        }
+
+        function stopPlaybackAutoRun() {
+            if (playbackPlayTimer) {
+                window.clearInterval(playbackPlayTimer);
+                playbackPlayTimer = null;
+            }
+            if (playbackEnvironmentTimer) {
+                window.clearInterval(playbackEnvironmentTimer);
+                playbackEnvironmentTimer = null;
+            }
+            if (playbackMotionTimer) {
+                window.clearInterval(playbackMotionTimer);
+                playbackMotionTimer = null;
+            }
+            playbackPlaying = false;
+            setPlaybackToggleLabel();
+            document.getElementById("camera-video").pause();
+        }
+
+        function startPlaybackAutoRun() {
+            const slider = document.getElementById("playback-slider");
+            playbackMode = true;
+            playbackPlaying = true;
+            setPlaybackToggleLabel();
+            loadPlaybackState();
+            playbackPlayTimer = window.setInterval(() => {
+                const nextValue = Math.min(Number(slider.value) + PLAYBACK_STEP_SECONDS, Number(slider.max));
+                slider.value = String(nextValue.toFixed(1));
+                const targetTime = getPlaybackTargetTime();
+                updatePlaybackLabels(targetTime);
+                updateCameraPlaybackStatus(targetTime.toISOString());
+                if (nextValue >= Number(slider.max)) {
+                    stopPlaybackAutoRun();
+                    loadPlaybackState();
+                    setPlaybackStatus("回溯播放已到达实时边界");
+                }
+            }, PLAYBACK_TICK_MS);
+            playbackMotionTimer = window.setInterval(loadPlaybackSensors, 100);
+            playbackEnvironmentTimer = window.setInterval(loadPlaybackSensors, 5000);
+        }
+
+        function togglePlaybackAutoRun() {
+            if (playbackPlaying) {
+                stopPlaybackAutoRun();
+                setPlaybackStatus(`回溯已暂停：${formatTime(getPlaybackTargetTime().toISOString())}`);
+                loadPlaybackState();
+                return;
+            }
+            startPlaybackAutoRun();
+        }
+
+        function returnToLiveMode() {
+            // 回到实时模式后恢复 MJPEG 实时流，并重新启动常规数据刷新逻辑。
+            stopPlaybackAutoRun();
+            playbackMode = false;
+            initializePlaybackTimeline();
+            setPlaybackToggleLabel();
+            showCameraImage(`/video_feed?cache=${Date.now()}`, "本地 USB 摄像头");
+            refreshEnvironmentDashboard();
+            refreshMotionDashboard();
+        }
+
         // 页面加载后立即请求一次数据。
+        initializeDatasetControls();
+        initializePlaybackTimeline();
+        document.getElementById("dataset-query-button").addEventListener("click", queryDatasetSummary);
+        document.getElementById("dataset-export-button").addEventListener("click", exportAlignedDataset);
+        document.getElementById("playback-slider").addEventListener("input", schedulePlaybackStateLoad);
+        document.getElementById("playback-window-button").addEventListener("click", jumpToPlaybackHourWindow);
+        document.getElementById("playback-toggle-button").addEventListener("click", togglePlaybackAutoRun);
+        document.getElementById("playback-live-button").addEventListener("click", returnToLiveMode);
+        document.getElementById("history-range-select").addEventListener("change", refreshEnvironmentDashboard);
+        setPlaybackToggleLabel();
         refreshEnvironmentDashboard();
         refreshMotionDashboard();
         // 温湿度和历史图每 5 秒刷新一次。
         setInterval(refreshEnvironmentDashboard, 5000);
-        // WT901 蓝牙运动信息每 100ms 刷新一次，对齐 10Hz 展示节奏。
+        // WT901 默认回传速率约 10Hz，因此页面按 100ms 刷新一次即可。
         setInterval(refreshMotionDashboard, 100);
+        // 实时模式下，时间轴按当前整点小时段每秒向前推进。
+        setInterval(updateRealtimeTimeline, 1000);
         // 窗口尺寸变化时同步调整图表大小。
         window.addEventListener("resize", () => chart.resize());
     </script>

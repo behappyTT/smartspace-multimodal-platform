@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -34,12 +34,17 @@ CAMERA_FRAME_DIR = RUNTIME_DATA_DIR / "camera_frames"
 CAMERA_VIDEO_DIR = RUNTIME_DATA_DIR / "camera_video"
 NORMALIZED_DIR = RUNTIME_DATA_DIR / "normalized_records"
 SOURCE_AUDIT_DIR = RUNTIME_DATA_DIR / "source_audit"
+MULTIMODAL_INDEX_DIR = RUNTIME_DATA_DIR / "multimodal_index"
+KNOWLEDGE_GRAPH_DIR = RUNTIME_DATA_DIR / "knowledge_graph"
+EXPORT_DIR = RUNTIME_DATA_DIR / "exports"
 
 DB_PATH = Path(os.getenv("SMARTSPACE_DB_PATH", str(DB_DIR / "smartspace.db")))
 NORMALIZED_RECORD_FILE = NORMALIZED_DIR / "sensor_data_records.jsonl"
 SOURCE_AUDIT_FILE = SOURCE_AUDIT_DIR / "source_audit.jsonl"
 CAMERA_FRAME_RECORD_FILE = CAMERA_FRAME_DIR / "camera_frame_records.jsonl"
 CAMERA_VIDEO_RECORD_FILE = CAMERA_VIDEO_DIR / "camera_video_records.jsonl"
+OBJECT_INDEX_FILE = MULTIMODAL_INDEX_DIR / "object_index.jsonl"
+KNOWLEDGE_GRAPH_SNAPSHOT_FILE = KNOWLEDGE_GRAPH_DIR / "knowledge_graph_snapshot.json"
 CAMERA_SAVE_INTERVAL_SECONDS = int(os.getenv("SMARTSPACE_CAMERA_SAVE_INTERVAL", "5"))
 CAMERA_VIDEO_FPS = float(os.getenv("SMARTSPACE_CAMERA_VIDEO_FPS", "12"))
 CAMERA_VIDEO_SEGMENT_SECONDS = int(os.getenv("SMARTSPACE_CAMERA_VIDEO_SEGMENT_SECONDS", "30"))
@@ -57,6 +62,9 @@ def ensure_runtime_directories() -> None:
         CAMERA_VIDEO_DIR,
         NORMALIZED_DIR,
         SOURCE_AUDIT_DIR,
+        MULTIMODAL_INDEX_DIR,
+        KNOWLEDGE_GRAPH_DIR,
+        EXPORT_DIR,
     ):
         path.mkdir(parents=True, exist_ok=True)
 
@@ -85,6 +93,57 @@ def append_jsonl(path: Path, content: dict) -> None:
         file.write(json.dumps(content, ensure_ascii=False) + "\n")
 
 
+def record_object_index(
+    object_type: str,
+    modality: str,
+    uri: str,
+    *,
+    timestamp: str | None = None,
+    start_time: str | None = None,
+    end_time: str | None = None,
+    device_id: int | None = None,
+    metadata: dict | None = None,
+) -> None:
+    """记录对象存储索引。
+
+    SQLite 继续负责结构化查询；视频、图片和原始 JSON 这类文件对象
+    通过该索引保留路径、模态和时间信息，便于后续做回放和数据集导出。
+    """
+
+    append_jsonl(
+        OBJECT_INDEX_FILE,
+        {
+            "indexed_at": utc_now_iso(),
+            "object_type": object_type,
+            "modality": modality,
+            "uri": uri,
+            "timestamp": timestamp,
+            "start_time": start_time,
+            "end_time": end_time,
+            "device_id": device_id,
+            "metadata": metadata or {},
+        },
+    )
+
+
+def read_object_index(limit: int | None = 100) -> list[dict]:
+    """读取最近的对象索引记录。"""
+
+    if not OBJECT_INDEX_FILE.exists():
+        return []
+
+    rows = []
+    with OBJECT_INDEX_FILE.open("r", encoding="utf-8") as file:
+        for line in file:
+            line = line.strip()
+            if not line:
+                continue
+            rows.append(json.loads(line))
+    if limit is None:
+        return rows
+    return rows[-limit:]
+
+
 def save_raw_upload(payload: dict, source_context: dict) -> str:
     """保存原始上传包。
 
@@ -102,6 +161,17 @@ def save_raw_upload(payload: dict, source_context: dict) -> str:
             "received_at": utc_now_iso(),
             "source": source_context,
             "payload": payload,
+        },
+    )
+    record_object_index(
+        object_type="raw_upload",
+        modality="metadata",
+        uri=str(file_path),
+        timestamp=utc_now_iso(),
+        device_id=payload.get("device_id"),
+        metadata={
+            "source": source_context,
+            "metric_count": len(payload.get("metrics", [])),
         },
     )
     return str(file_path)
@@ -167,6 +237,19 @@ def record_standardized_sensor_data(
             },
         )
 
+    record_object_index(
+        object_type="standardized_sensor_data",
+        modality="time_series",
+        uri=str(file_path),
+        timestamp=utc_now_iso(),
+        device_id=device_info.get("device_id"),
+        metadata={
+            "device": device_info,
+            "metric_count": len(metrics),
+            "raw_file_path": raw_file_path,
+        },
+    )
+
     return str(file_path)
 
 
@@ -215,6 +298,16 @@ def save_camera_frame(frame, camera_index: int) -> str:
             "frame_path": str(file_path),
         },
     )
+    recorded_at = utc_now_iso()
+    record_object_index(
+        object_type="camera_frame",
+        modality="image",
+        uri=str(file_path),
+        timestamp=recorded_at,
+        metadata={
+            "camera_index": camera_index,
+        },
+    )
     return str(file_path)
 
 
@@ -237,12 +330,31 @@ def record_camera_video_session(
 ) -> None:
     """记录一次摄像头录像会话元数据。"""
 
+    started_at = datetime.now(timezone.utc).replace(microsecond=0)
+    ended_at = started_at + timedelta(seconds=CAMERA_VIDEO_SEGMENT_SECONDS)
+    start_time = started_at.isoformat().replace("+00:00", "Z")
+    end_time = ended_at.isoformat().replace("+00:00", "Z")
     append_jsonl(
         CAMERA_VIDEO_RECORD_FILE,
         {
-            "recorded_at": utc_now_iso(),
+            "recorded_at": start_time,
             "camera_index": camera_index,
             "file_path": file_path,
+            "start_time": start_time,
+            "end_time": end_time,
+            "fps": fps,
+            "frame_width": frame_width,
+            "frame_height": frame_height,
+        },
+    )
+    record_object_index(
+        object_type="camera_video_segment",
+        modality="video",
+        uri=file_path,
+        start_time=start_time,
+        end_time=end_time,
+        metadata={
+            "camera_index": camera_index,
             "fps": fps,
             "frame_width": frame_width,
             "frame_height": frame_height,

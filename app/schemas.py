@@ -9,6 +9,7 @@
 """
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -146,3 +147,75 @@ class HistoryResponse(BaseModel):
     device_id: int | None
     hours: int
     series: list[HistorySeries]
+
+
+class SemanticTriple(BaseModel):
+    """知识图谱三元组。"""
+
+    subject: str
+    predicate: str
+    object: str
+    source: str | None = None
+
+
+class KnowledgeGraphResponse(BaseModel):
+    """轻量知识图谱响应模型。"""
+
+    generated_at: str
+    description: str
+    model_layers: list[dict[str, Any]]
+    triple_count: int
+    triples: list[SemanticTriple]
+    snapshot_path: str | None = None
+
+
+class ObjectIndexResponse(BaseModel):
+    """对象索引响应模型。"""
+
+    count: int
+    items: list[dict[str, Any]]
+
+
+class DatasetQueryResponse(BaseModel):
+    """数据集查询摘要响应模型。"""
+
+    start_time: str
+    end_time: str
+    device_type: str
+    sensor_data_count: int
+    object_index_count: int
+    sensor_data_preview: list[dict[str, Any]]
+    object_index_preview: list[dict[str, Any]]
+
+
+class TimelineCameraFrame(BaseModel):
+    """时间轴回放对应的摄像头帧。"""
+
+    available: bool
+    timestamp: str | None
+    frame_path: str | None
+    source: str | None
+    delta_seconds: float | None
+
+
+class TimelineCameraVideo(BaseModel):
+    """时间轴回放对应的摄像头视频片段。"""
+
+    available: bool
+    start_time: str | None
+    end_time: str | None
+    video_path: str | None
+    source: str | None
+    delta_seconds: float | None
+    offset_seconds: float | None
+    segment_key: str | None
+
+
+class TimelineStateResponse(BaseModel):
+    """指定时刻附近的多模态状态。"""
+
+    target_time: str
+    environment: DashboardLatestResponse
+    motion: DashboardLatestResponse
+    camera_frame: TimelineCameraFrame
+    camera_video: TimelineCameraVideo

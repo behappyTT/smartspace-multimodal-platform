@@ -27,6 +27,8 @@ TARGET_MAC = os.getenv("SMARTSPACE_WT901_MAC", "E5:64:B0:59:D2:42") or None
 
 SERVICE_UUID = "0000ffe5-0000-1000-8000-00805f9a34fb"
 NOTIFY_UUID = "0000ffe4-0000-1000-8000-00805f9a34fb"
+# 当前版本只订阅 FFE4 通知特征，不向 WT901 写入 RATE 配置命令。
+# 如果设备保持出厂默认配置，通常按 0x06 对应的 10Hz 回传数据。
 
 
 class WT901AccGyrReceiver:
@@ -62,6 +64,8 @@ class WT901AccGyrReceiver:
             del self.buffer[:20]
 
             try:
+                # WT901 的 0x55 0x61 帧中连续包含加速度和角速度原始整数值。
+                # 后续按说明书比例系数换算为 g 和 deg/s，供平台统一展示。
                 ax, ay, az, wx, wy, wz, _, _, _ = struct.unpack("<hhhhhhhhh", frame[2:20])
             except struct.error:
                 continue
@@ -109,6 +113,7 @@ async def stream_wt901_motion_data(
     receiver = WT901AccGyrReceiver(on_motion_data=on_motion_data)
 
     def notification_handler(_sender, data: bytearray):
+        # Bleak 收到的是一段原始字节流，可能包含半帧或多帧，因此先交给缓冲区解析器处理。
         receiver.feed(bytes(data))
 
     async with BleakClient(device, timeout=15.0) as client:
@@ -124,6 +129,7 @@ async def stream_wt901_motion_data(
 
         try:
             while True:
+                # 这里的 sleep 只用于保持协程存活，不控制 WT901 的硬件回传频率。
                 await asyncio.sleep(1)
         finally:
             await client.stop_notify(NOTIFY_UUID)

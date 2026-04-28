@@ -31,6 +31,8 @@ BASE_API_URL = API_URL.removesuffix("/sensor-data/upload")
 DEVICE_ID = int(os.getenv("SMARTSPACE_BLUETOOTH_DEVICE_ID", "0"))
 DEVICE_NAME = os.getenv("SMARTSPACE_BLUETOOTH_DEVICE_NAME", "WT901蓝牙采集节点")
 SOURCE_NAME = os.getenv("SMARTSPACE_BLUETOOTH_SOURCE_NAME", "wt901_bluetooth_node")
+# 当前采集代码只订阅 WT901 的 BLE 通知，不主动写入 RATE 配置。
+# 因此这里的 0.1 秒表示“上传层检查最新帧的间隔”，用于配合 WT901 默认约 10Hz 的回传节奏。
 UPLOAD_INTERVAL_SECONDS = float(os.getenv("SMARTSPACE_BLUETOOTH_UPLOAD_INTERVAL", "0.1"))
 WT901_NAME = os.getenv("SMARTSPACE_WT901_NAME", TARGET_NAME)
 WT901_MAC = os.getenv("SMARTSPACE_WT901_MAC", TARGET_MAC or "") or None
@@ -69,6 +71,7 @@ class MotionState:
 
         timestamp = self.latest_payload["timestamp"]
         if timestamp == self.last_uploaded_timestamp:
+            # WT901 通知帧没有更新时不重复上传旧数据，避免数据库中出现同一时刻的重复记录。
             return None
 
         self.last_uploaded_timestamp = timestamp

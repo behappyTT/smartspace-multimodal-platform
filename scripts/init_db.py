@@ -40,7 +40,7 @@ def seed_devices_and_sensors():
                 ip_address="127.0.0.1",
                 port=1883,
                 status="online",
-                description="真实树莓派环境采集节点，建议通过 MQTT 上报标准化温湿度数据",
+                description="真实树莓派 SEN0501 环境采集节点，建议通过 MQTT 上报温度、湿度、气压、海拔、紫外线和环境光数据",
             )
             db.add(sensor_node)
             db.flush()
@@ -73,7 +73,7 @@ def seed_devices_and_sensors():
 
         db.flush()
 
-        # 为树莓派节点补齐温度和湿度两个传感器档案。
+        # 为树莓派节点补齐 SEN0501 支持的六类环境传感器档案。
         for sensor_type in constants.ENV_SENSOR_TYPES:
             unit = constants.SENSOR_UNIT_MAP[sensor_type]
             existing = (

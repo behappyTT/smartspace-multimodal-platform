@@ -7,8 +7,8 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
+import os
 
 from app import constants
 
@@ -22,17 +22,36 @@ def read_from_dht22() -> dict[str, float]:
 
 
 def read_from_sen0501() -> dict[str, float]:
-    """预留 SKU:SEN0501 真实采集接口。
+    """读取 SKU:SEN0501 多功能环境传感器。
 
-    当树莓派接入 SKU:SEN0501 芯片时，建议搭配 MQTT 上传协议使用。
-    你只需要在这里补充真实读取逻辑，返回值仍保持统一结构：
-    {
-        "temperature": 数值,
-        "humidity": 数值
-    }
+    SEN0501 集成温湿度、气压、海拔估算、紫外线和环境光。
+    这里优先使用 `dfrobot-environmental-sensor` 库，让官方驱动负责
+    寄存器读取与单位换算，采集层只保留统一字段命名。
     """
 
-    raise NotImplementedError("请在此处接入 SKU:SEN0501 读取逻辑")
+    try:
+        from dfrobot_environmental_sensor import EnvironmentalSensor, Units, UVSensor
+    except ImportError as exc:
+        raise RuntimeError("请先在树莓派上执行: pip install dfrobot-environmental-sensor") from exc
+
+    uv_variant_name = os.getenv("SEN0501_UV_VARIANT", "LTR390UV").upper()
+    uv_variant = getattr(UVSensor, uv_variant_name, UVSensor.LTR390UV)
+    sensor = EnvironmentalSensor.i2c(
+        bus=int(os.getenv("SEN0501_I2C_BUS", "1")),
+        address=int(os.getenv("SEN0501_I2C_ADDRESS", "0x22"), 0),
+        uv_sensor=uv_variant,
+    )
+    if not sensor.is_present():
+        raise RuntimeError("SEN0501 未响应，请检查 I2C 开关、接线、电源和地址 0x22")
+
+    return {
+        constants.SensorType.TEMPERATURE: round(float(sensor.read_temperature(Units.C)), 2),
+        constants.SensorType.HUMIDITY: round(float(sensor.read_humidity()), 2),
+        constants.SensorType.PRESSURE: round(float(sensor.read_pressure(Units.HPA)), 2),
+        constants.SensorType.ALTITUDE: round(float(sensor.estimate_altitude()), 2),
+        constants.SensorType.ULTRAVIOLET: round(float(sensor.read_uv_irradiance()), 4),
+        constants.SensorType.ILLUMINANCE: round(float(sensor.read_illuminance()), 2),
+    }
 
 
 def read_from_bme280() -> dict[str, float]:
@@ -68,13 +87,10 @@ def read_environment_metrics() -> list[dict[str, Any]]:
     # 把底层采集结果标准化为统一 JSON metrics 结构。
     return [
         {
-            "sensor_type": constants.SensorType.TEMPERATURE,
-            "value": raw_data[constants.SensorType.TEMPERATURE],
-            "unit": constants.SENSOR_UNIT_MAP[constants.SensorType.TEMPERATURE],
-        },
-        {
-            "sensor_type": constants.SensorType.HUMIDITY,
-            "value": raw_data[constants.SensorType.HUMIDITY],
-            "unit": constants.SENSOR_UNIT_MAP[constants.SensorType.HUMIDITY],
-        },
+            "sensor_type": sensor_type,
+            "value": raw_data[sensor_type],
+            "unit": constants.SENSOR_UNIT_MAP[sensor_type],
+        }
+        for sensor_type in constants.ENV_SENSOR_TYPES
+        if sensor_type in raw_data
     ]

@@ -22,11 +22,15 @@ class DeviceType:
 class SensorType:
     """传感器类型枚举。
 
-    当前演示包含环境温湿度与 WT901 的加速度、角速度。
+    当前演示包含 SEN0501 环境指标与 WT901 的加速度、角速度。
     """
 
     TEMPERATURE = "temperature"
     HUMIDITY = "humidity"
+    PRESSURE = "pressure"
+    ALTITUDE = "altitude"
+    ULTRAVIOLET = "ultraviolet"
+    ILLUMINANCE = "illuminance"
     ACCELERATION_X = "acceleration_x"
     ACCELERATION_Y = "acceleration_y"
     ACCELERATION_Z = "acceleration_z"
@@ -44,6 +48,10 @@ SUPPORTED_DEVICE_TYPES: Final[set[str]] = {
 ENV_SENSOR_TYPES: Final[list[str]] = [
     SensorType.TEMPERATURE,
     SensorType.HUMIDITY,
+    SensorType.PRESSURE,
+    SensorType.ALTITUDE,
+    SensorType.ULTRAVIOLET,
+    SensorType.ILLUMINANCE,
 ]
 
 MOTION_SENSOR_TYPES: Final[list[str]] = [
@@ -63,6 +71,10 @@ SUPPORTED_SENSOR_TYPES: Final[set[str]] = {
 SENSOR_UNIT_MAP: Final[dict[str, str]] = {
     SensorType.TEMPERATURE: "C",
     SensorType.HUMIDITY: "%",
+    SensorType.PRESSURE: "hPa",
+    SensorType.ALTITUDE: "m",
+    SensorType.ULTRAVIOLET: "mW/cm2",
+    SensorType.ILLUMINANCE: "lx",
     SensorType.ACCELERATION_X: "g",
     SensorType.ACCELERATION_Y: "g",
     SensorType.ACCELERATION_Z: "g",
@@ -74,6 +86,10 @@ SENSOR_UNIT_MAP: Final[dict[str, str]] = {
 DEFAULT_SENSOR_NAMES: Final[dict[str, str]] = {
     SensorType.TEMPERATURE: "温度传感器",
     SensorType.HUMIDITY: "湿度传感器",
+    SensorType.PRESSURE: "大气压强传感器",
+    SensorType.ALTITUDE: "海拔高度估算",
+    SensorType.ULTRAVIOLET: "紫外线强度传感器",
+    SensorType.ILLUMINANCE: "环境光强度传感器",
     SensorType.ACCELERATION_X: "加速度 X 轴",
     SensorType.ACCELERATION_Y: "加速度 Y 轴",
     SensorType.ACCELERATION_Z: "加速度 Z 轴",

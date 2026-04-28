@@ -1,4 +1,4 @@
-# 智能空间多模态数据感知平台（最小可运行版本）
+# 面向智能空间的多模态感知数据采集系统和分析平台
 
 本项目是一个适合本科毕业设计展示的最小可运行版本，目标是演示“异构设备统一接入、传感器数据规范化处理、统一存储与可视化展示”的完整闭环。
 
@@ -8,57 +8,66 @@
 - 树莓派环境采集节点
 - WT901 蓝牙采集节点
 
-当前平台不再内置模拟温湿度数据，前端展示只依赖真实树莓派节点和 WT901 蓝牙节点上报。平台现在同时支持 HTTP 和 MQTT 两种协议，其中树莓派接入真实传感器时建议走 MQTT，WT901 蓝牙节点则通过本机 BLE 采集后使用 HTTP 上传；后续如果替换为真实 SKU:SEN0501、DHT22、BME280 等传感器，平台后端接口、数据库结构和前端页面都无需修改，只需要替换对应采集层。
+当前平台不再内置模拟环境数据，前端展示只依赖真实树莓派节点和 WT901 蓝牙节点上报。平台现在同时支持 HTTP 和 MQTT 两种协议，其中树莓派接入真实 SEN0501 环境传感器时建议走 MQTT，WT901 蓝牙节点则通过本机 BLE 采集后使用 HTTP 上传；后续如果替换为其他真实传感器，平台后端接口和数据库结构无需修改，只需要替换对应采集层。
 
 时间处理说明：
 
 - 后端与数据库统一按 UTC 标准时间存储，便于不同来源设备做规范化管理
 - 前端页面按浏览器本地时间显示，因此页面上看到的是“本地时间格式化后的采集时间”
-- 树莓派默认每 5 秒上传一次温湿度，所以页面上的时间可能比“此刻时间”落后几秒，这是正常现象
-- WT901 蓝牙运动信息默认按约 0.1 秒上传一次，页面默认按 0.1 秒刷新一次
+- 树莓派默认每 5 秒上传一次温度、湿度、大气压、海拔、紫外线和环境光，所以页面上的时间可能比“此刻时间”落后几秒，这是正常现象
+- WT901 蓝牙节点当前不主动写入 RATE 配置，按设备默认约 10Hz 回传节奏使用；上传层默认每 0.1 秒检查一次最新帧，页面默认每 0.1 秒刷新一次
 - 蓝牙运动数据在数据库与本地标准化文件中保留毫秒级时间戳，便于展示高频变化
 
 ## 1. 项目目录结构
 
 ```text
 smartspace-platform/
-├─ app/                              # 后端主程序目录
-│  ├─ services/                      # 业务服务层，放规范化处理和视频流逻辑
-│  │  ├─ mqtt_listener.py            # MQTT 订阅接入服务，接收树莓派 MQTT 上报
-│  │  ├─ normalizer.py               # 标准化上传校验、时间统一、metrics 拆分入库
-│  │  └─ video.py                    # OpenCV 摄像头后台采集、抓拍落盘与 MJPEG 视频流输出
-│  ├─ static/                        # 前端静态资源目录
-│  │  └─ style.css                   # 仪表盘页面样式
-│  ├─ templates/                     # 前端模板目录
-│  │  └─ index.html                  # 仪表盘页面，展示视频、温湿度历史图与 WT901 运动信息
-│  ├─ __init__.py                    # Python 包初始化文件
-│  ├─ constants.py                   # 集中定义设备类型、传感器类型、单位映射等常量
-│  ├─ crud.py                        # 数据库增删改查函数封装
-│  ├─ database.py                    # SQLite 连接、SQLAlchemy 会话与 Base 定义
-│  ├─ main.py                        # FastAPI 应用入口与全部接口定义
-│  ├─ models.py                      # device、sensor、sensor_data 三张表的 ORM 模型
-│  ├─ schemas.py                     # 请求体与响应体的数据模型定义
-│  └─ storage.py                     # 运行时数据目录管理、原始上传备份和来源审计记录
-├─ runtime_data/                     # 程序运行时数据目录
-│  ├─ db/                            # SQLite 数据库文件存放目录
-│  ├─ raw_uploads/                   # 原始上传 JSON 备份目录
-│  ├─ standardized_data/             # 本地标准化传感器数据文件目录
-│  ├─ camera_frames/                 # 摄像头定时抓拍画面与元数据目录
-│  ├─ camera_video/                  # 摄像头后台 MP4 录像文件与元数据目录
-│  ├─ normalized_records/            # 规范化后的记录日志目录
-│  ├─ source_audit/                  # 数据来源审计日志目录
-│  └─ README.md                      # 运行时数据目录说明文档
-├─ bluetooth_node/                   # WT901 蓝牙采集节点脚本目录
-│  ├─ collector.py                   # BLE 采集层，负责连接 WT901 并解析加速度和角速度
-│  └─ uploader.py                    # 蓝牙上传层，把 WT901 数据转换为统一 metrics 结构并上传
-├─ raspberry_pi/                     # 树莓派侧脚本目录
-│  ├─ collector.py                   # 数据采集层，仅保留真实传感器接口
-│  └─ uploader.py                    # 数据上传层，支持 MQTT / HTTP 两种协议
-├─ scripts/                          # 辅助脚本目录
-│  └─ init_db.py                     # 初始化数据库、设备和传感器基础档案
-├─ requirements.txt                  # 项目依赖列表
-├─ run.py                            # 本地启动入口，直接运行 FastAPI 服务
-└─ README.md                         # 项目中文说明文档
+├─ app/                              # 平台后端与网页仪表盘代码
+│  ├─ services/                      # 业务服务模块，封装采集接入、标准化、导出和回溯逻辑
+│  │  ├─ dataset_export.py           # 数据查询与对齐导出服务，生成 CSV/JSON/manifest ZIP
+│  │  ├─ environment_analysis.py     # 空间环境状态分析服务，生成舒适度、运动适宜性和调整建议
+│  │  ├─ knowledge_graph.py          # 轻量知识图谱服务，生成空间、设备、传感器和文件对象关系
+│  │  ├─ mqtt_listener.py            # MQTT 接入服务，接收树莓派等节点的持续上报
+│  │  ├─ normalizer.py               # 数据标准化服务，校验类型、统一时间并拆分 metrics 入库
+│  │  ├─ timeline.py                 # 历史回溯服务，按目标时间查询多模态状态
+│  │  └─ video.py                    # 摄像头服务，提供 MJPEG 视频流、抓拍和录像分段
+│  ├─ static/                        # 仪表盘静态资源
+│  │  └─ style.css                   # 页面布局、卡片、时间轴和导出面板样式
+│  ├─ templates/                     # Jinja2 页面模板
+│  │  └─ index.html                  # 主仪表盘页面，包含实时展示、历史回溯和数据导出交互
+│  ├─ __init__.py                    # Python 包标记文件
+│  ├─ constants.py                   # 设备类型、传感器类型、单位映射等全局常量
+│  ├─ crud.py                        # 数据库查询与写入函数封装
+│  ├─ database.py                    # SQLite/SQLAlchemy 连接配置
+│  ├─ knowledge_graph.json           # 知识图谱种子三元组，用于模拟语义关联关系
+│  ├─ main.py                        # FastAPI 应用入口，集中定义页面和 API 路由
+│  ├─ models.py                      # 关系型数据库 ORM 模型：device、sensor、sensor_data
+│  ├─ schemas.py                     # API 请求体和响应体模型，支撑自动校验与接口文档
+│  └─ storage.py                     # 运行时文件存储工具，管理原始包、标准化文件、对象索引等
+├─ runtime_data/                     # 运行时生成数据，不作为源代码提交
+│  ├─ db/                            # SQLite 数据库文件
+│  ├─ raw_uploads/                   # 原始上传包备份
+│  ├─ standardized_data/             # 标准化后的传感器 JSONL 数据
+│  ├─ camera_frames/                 # 摄像头抓拍图片与抓拍记录
+│  ├─ camera_video/                  # 摄像头分段录像文件
+│  ├─ normalized_records/            # 规范化处理结果日志
+│  ├─ source_audit/                  # 数据来源审计日志
+│  ├─ multimodal_index/              # 图片、视频、原始 JSON 等文件对象索引
+│  ├─ knowledge_graph/               # 知识图谱运行时快照
+│  └─ exports/                       # 对齐导出的多模态数据集 ZIP
+├─ bluetooth_node/                   # 本机 WT901 蓝牙节点接入脚本
+│  ├─ collector.py                   # BLE 通知采集与加速度/角速度帧解析
+│  └─ uploader.py                    # 将 WT901 最新帧转换为统一 metrics 后上传到平台
+├─ raspberry_pi/                     # 树莓派环境采集节点脚本
+│  ├─ collector.py                   # 真实传感器读取入口，预留 SEN0501/DHT22/BME280 接口
+│  └─ uploader.py                    # 环境数据上传脚本，支持 MQTT 和 HTTP 两种传输方式
+├─ scripts/                          # 项目辅助脚本
+│  └─ init_db.py                     # 初始化数据库表、设备档案和传感器档案
+├─ requirements.txt                  # Python 依赖清单
+├─ run.py                            # 本地开发启动入口
+├─ start.bat                         # Windows CMD 一键启动脚本
+├─ start.ps1                         # PowerShell 一键启动脚本
+└─ README.md                         # 项目说明文档
 ```
 
 ## 2. 运行环境
@@ -87,8 +96,8 @@ python scripts/init_db.py
 - 1 个树莓派环境采集节点设备
 - 1 个 WT901 蓝牙采集节点设备
 - 1 个摄像头设备
-- 8 个传感器记录
-  - 温度、湿度
+- 12 个传感器记录
+  - 温度、湿度、大气压、海拔、紫外线、环境光
   - 加速度 X/Y/Z
   - 角速度 X/Y/Z
 - 不写入任何演示历史数据
@@ -135,7 +144,7 @@ set SMARTSPACE_DATABASE_URL=sqlite:///:memory:
 python raspberry_pi/uploader.py
 ```
 
-该脚本默认每 5 秒上传一次真实温湿度数据，默认走 MQTT 协议。
+该脚本默认每 5 秒上传一次真实环境数据，包含温度、湿度、大气压、海拔、紫外线和环境光，默认走 MQTT 协议。
 默认会按全新初始化后的设备档案使用 `device_id=1` 作为树莓派环境采集节点；如果你的数据库不是全新初始化的，请先通过 `/devices` 确认节点编号，再设置：
 
 ```bash
@@ -154,7 +163,8 @@ python bluetooth_node/uploader.py
 
 - 通过 BLE 搜索并连接 WT901SDCL-BT50
 - 解析加速度和角速度
-- 每隔 1 秒上传一帧最新运动数据到平台
+- 当前代码不主动修改 WT901 的 RATE 参数，默认按设备常见默认值约 10Hz 接收通知数据
+- 上传层默认每隔 0.1 秒检查并上传一帧最新运动数据到平台，若没有新通知帧则不会重复上传旧数据
 
 默认优先使用当前项目内置的 WT901 设备信息：
 
@@ -246,6 +256,8 @@ set SMARTSPACE_MQTT_TOPIC_PREFIX=smartspace/sensor/upload
 - 将摄像头视频流按固定时间间隔抓拍并保存到 `runtime_data/camera_frames/`
 - 将规范化结果保存到 `runtime_data/normalized_records/`
 - 将来源信息保存到 `runtime_data/source_audit/`
+- 将视频、图片、原始上传 JSON 和标准化文件登记到 `runtime_data/multimodal_index/object_index.jsonl`
+- 基于 `app/knowledge_graph.json` 和当前数据库内容生成轻量知识图谱三元组
 
 ### 4.3 运行时数据目录设计
 
@@ -265,6 +277,10 @@ set SMARTSPACE_MQTT_TOPIC_PREFIX=smartspace/sensor/upload
   存放规范化后的 JSONL 记录，体现统一传感器结构和标准化时间格式。
 - `runtime_data/source_audit/`
   存放来源审计日志，记录设备编号、来源 IP、采集模式、传输方式等信息。
+- `runtime_data/multimodal_index/`
+  存放对象索引文件，记录视频、图片、原始上传 JSON 等非结构化文件的路径、模态和时间信息。
+- `runtime_data/knowledge_graph/`
+  存放知识图谱运行时快照，用于展示空间、设备、传感器和媒体文件之间的语义关系。
 
 这种设计的好处是：
 
@@ -274,9 +290,37 @@ set SMARTSPACE_MQTT_TOPIC_PREFIX=smartspace/sensor/upload
   默认每 30 秒生成一个独立 MP4；若服务提前停止，不足 30 秒的最后片段也会正常封口并保留
 - `camera_frames/` 负责本地保存摄像头画面数据
 - 文件目录负责原始数据留痕和来源追踪
+- `multimodal_index/` 负责索引非结构化文件对象，便于后续回放和导出
+- `knowledge_graph/` 负责保存语义关系快照，便于展示多模型扩展思路
 - 既保持三表结构简洁，又增强了平台的数据治理能力
 
-### 4.4 数据库表结构
+### 4.4 多模型数据库扩展设计
+
+当前版本仍然以关系型数据库作为核心实现，使用 `device`、`sensor`、`sensor_data` 三张表管理设备、传感器和观测数据。为了支撑后续历史回溯、数据集导出和多模态语义分析，系统增加了轻量的多模型扩展层：
+
+- 关系模型：继续使用 SQLite 管理设备、传感器和结构化观测数据。
+- 时序模型：通过 `sensor_data.timestamp` 和 `standardized_data` 中的标准化 JSONL 文件表达高频传感器时间序列。
+- 对象存储模型：通过 `runtime_data/multimodal_index/object_index.jsonl` 索引视频、图片和原始 JSON 文件。
+- 知识图谱模型：通过 `app/knowledge_graph.json` 和 `/knowledge-graph` 接口表达空间、设备、传感器、观测数据和媒体文件之间的语义关系。
+
+相关接口：
+
+- `/object-index`
+  查看最近登记的对象索引记录。
+- `/knowledge-graph`
+  查看当前系统生成的知识图谱三元组。
+- `/knowledge-graph?snapshot=true`
+  生成并保存一份运行时知识图谱快照到 `runtime_data/knowledge_graph/`。
+- `/dataset/query`
+  按时间范围和设备类型查询可导出的传感器数据与对象索引摘要。
+- `/dataset/export`
+  按时间范围和设备类型导出对齐后的多模态数据包，ZIP 内包含 `sensor_data.csv`、`object_index.json` 和 `manifest.json`。
+- `/timeline/state`
+  按指定时间点查询附近的环境数据、蓝牙运动数据和摄像头抓拍索引，用于历史回溯时间轴。
+- `/timeline/frame`
+  返回指定时间点附近的摄像头抓拍图片。
+
+### 4.5 数据库表结构
 
 #### device
 
@@ -436,8 +480,9 @@ python scripts/init_db.py
 
 - `GET /devices` 能看到摄像头、树莓派节点和蓝牙节点
 - `GET /sensors` 能看到温湿度、加速度、角速度传感器
-- `GET /dashboard/latest` 能返回当前最新温湿度
+- `GET /dashboard/latest` 能返回当前最新环境指标
 - `GET /dashboard/latest-motion` 能返回当前最新加速度和角速度
+- `GET /analysis/environment` 能返回当前空间环境状态分析
 - `GET /sensor-data/history` 能返回折线图所需历史数据
 
 ### 7.3 标准化上传验证
@@ -453,7 +498,7 @@ python raspberry_pi/uploader.py
 - 终端每 5 秒打印一次上传成功信息
 - `POST /sensor-data/upload` 返回 `stored_count = 2`
 - `normalized_timestamp` 为规范化 ISO 时间
-- 前端页面中的当前温湿度会自动刷新
+- 前端页面中的当前环境指标和空间环境状态分析会自动刷新
 - `runtime_data/raw_uploads/` 中出现原始上传 JSON 文件
 - `runtime_data/standardized_data/` 中出现本地标准化传感器数据文件
 - `runtime_data/camera_frames/` 中出现摄像头抓拍图片和元数据
@@ -472,7 +517,7 @@ python bluetooth_node/uploader.py
 
 - 终端能看到 WT901 已连接提示
 - 后端 `POST /sensor-data/upload` 返回 `stored_count = 6`
-- 前端蓝牙运动信息区域会自动刷新
+- 前端蓝牙运动信息区域会按约 10Hz 自动刷新
 - `runtime_data/standardized_data/` 中出现加速度和角速度标准化记录
 
 ### 7.5 摄像头视频流验证
@@ -491,10 +536,11 @@ python bluetooth_node/uploader.py
 验证点：
 
 - 页面能显示摄像头区域
-- 当前温度、当前湿度能展示
+- 当前温度、湿度、大气压、海拔、紫外线和环境光能展示
+- 空间环境状态分析卡片能给出综合评分、关键判断和调整建议
 - 历史折线图能加载
 - 温湿度折线图下方能显示 WT901 的加速度与角速度信息
-- 每 5 秒自动刷新一次
+- 温湿度数据每 5 秒自动刷新一次，WT901 运动信息按约 10Hz 刷新
 
 ## 8. 演示建议
 
@@ -503,7 +549,7 @@ python bluetooth_node/uploader.py
 1. 先运行 `init_db.py`，展示数据库和设备档案已准备完成
 2. 启动 FastAPI 服务，打开 `docs` 页面说明接口
 3. 打开首页仪表盘，展示摄像头画面与“暂无实时数据”空态
-4. 启动树莓派程序，展示最新温湿度每 5 秒更新
+4. 启动树莓派程序，展示六项环境指标和空间环境状态分析每 5 秒更新
 5. 启动 WT901 蓝牙脚本，展示加速度和角速度实时刷新
 6. 说明采集层后续可在 sen0501、DHT22、BME280 等真实传感器之间切换
 

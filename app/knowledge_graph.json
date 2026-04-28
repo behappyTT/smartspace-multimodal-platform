@@ -1,0 +1,42 @@
+[
+  {
+    "subject": "智能空间演示场景",
+    "predicate": "包含",
+    "object": "树莓派环境采集节点"
+  },
+  {
+    "subject": "智能空间演示场景",
+    "predicate": "包含",
+    "object": "WT901蓝牙采集节点"
+  },
+  {
+    "subject": "智能空间演示场景",
+    "predicate": "包含",
+    "object": "教室USB摄像头"
+  },
+  {
+    "subject": "树莓派环境采集节点",
+    "predicate": "挂载",
+    "object": "温度传感器"
+  },
+  {
+    "subject": "树莓派环境采集节点",
+    "predicate": "挂载",
+    "object": "湿度传感器"
+  },
+  {
+    "subject": "WT901蓝牙采集节点",
+    "predicate": "挂载",
+    "object": "加速度与角速度传感器"
+  },
+  {
+    "subject": "传感器观测数据",
+    "predicate": "时间对齐",
+    "object": "摄像头视频片段"
+  },
+  {
+    "subject": "多模态数据集",
+    "predicate": "由时间窗口构建",
+    "object": "传感器数据与媒体文件索引"
+  }
+]
