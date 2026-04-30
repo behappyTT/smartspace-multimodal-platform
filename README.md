@@ -4,9 +4,12 @@
 
 当前支持三类设备：
 
-- 摄像头
-- 树莓派环境采集节点
-- WT901 蓝牙采集节点
+- 摄像头（usb接入）
+- 树莓派环境采集节点（树莓派5主板：https://www.yahboom.com/study/raspberry5提取码：erwp
+                    Gravity五合一环境传感器：https://www.dfrobot.com.cn/goods-3454.html）
+- WT901 蓝牙采集节点（wt901协议：https://wit-motion.yuque.com/wumwnr/ltst03/bg5o5gymbkriihep
+                    示例代码：https://wit-motion.yuque.com/wumwnr/ltst03/stpd3x5zp7075l8g）
+
 
 当前平台不再内置模拟环境数据，前端展示只依赖真实树莓派节点和 WT901 蓝牙节点上报。平台现在同时支持 HTTP 和 MQTT 两种协议，其中树莓派接入真实 SEN0501 环境传感器时建议走 MQTT，WT901 蓝牙节点则通过本机 BLE 采集后使用 HTTP 上传；后续如果替换为其他真实传感器，平台后端接口和数据库结构无需修改，只需要替换对应采集层。
 
