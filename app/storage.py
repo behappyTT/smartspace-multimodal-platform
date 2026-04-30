@@ -42,12 +42,13 @@ DB_PATH = Path(os.getenv("SMARTSPACE_DB_PATH", str(DB_DIR / "smartspace.db")))
 NORMALIZED_RECORD_FILE = NORMALIZED_DIR / "sensor_data_records.jsonl"
 SOURCE_AUDIT_FILE = SOURCE_AUDIT_DIR / "source_audit.jsonl"
 CAMERA_FRAME_RECORD_FILE = CAMERA_FRAME_DIR / "camera_frame_records.jsonl"
-CAMERA_VIDEO_RECORD_FILE = CAMERA_VIDEO_DIR / "camera_video_records.jsonl"
+CAMERA_VIDEO_RECORD_FILE = MULTIMODAL_INDEX_DIR / "camera_video_records.jsonl"
+LEGACY_CAMERA_VIDEO_RECORD_FILE = CAMERA_VIDEO_DIR / "camera_video_records.jsonl"
 OBJECT_INDEX_FILE = MULTIMODAL_INDEX_DIR / "object_index.jsonl"
 KNOWLEDGE_GRAPH_SNAPSHOT_FILE = KNOWLEDGE_GRAPH_DIR / "knowledge_graph_snapshot.json"
 CAMERA_SAVE_INTERVAL_SECONDS = int(os.getenv("SMARTSPACE_CAMERA_SAVE_INTERVAL", "5"))
 CAMERA_VIDEO_FPS = float(os.getenv("SMARTSPACE_CAMERA_VIDEO_FPS", "12"))
-CAMERA_VIDEO_SEGMENT_SECONDS = int(os.getenv("SMARTSPACE_CAMERA_VIDEO_SEGMENT_SECONDS", "30"))
+CAMERA_VIDEO_SEGMENT_SECONDS = int(os.getenv("SMARTSPACE_CAMERA_VIDEO_SEGMENT_SECONDS", "60"))
 
 
 def ensure_runtime_directories() -> None:
@@ -133,12 +134,15 @@ def read_object_index(limit: int | None = 100) -> list[dict]:
         return []
 
     rows = []
-    with OBJECT_INDEX_FILE.open("r", encoding="utf-8") as file:
+    with OBJECT_INDEX_FILE.open("r", encoding="utf-8-sig") as file:
         for line in file:
             line = line.strip()
             if not line:
                 continue
-            rows.append(json.loads(line))
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
     if limit is None:
         return rows
     return rows[-limit:]
@@ -311,12 +315,13 @@ def save_camera_frame(frame, camera_index: int) -> str:
     return str(file_path)
 
 
-def build_camera_video_path(camera_index: int) -> Path:
+def build_camera_video_path(camera_index: int, started_at: datetime | None = None) -> Path:
     """构造摄像头 MP4 录像文件路径。"""
 
     ensure_runtime_directories()
-    date_dir = CAMERA_VIDEO_DIR / datetime.now(timezone.utc).strftime("%Y%m%d")
-    file_name = f"{datetime.now(timezone.utc).strftime('%H%M%S')}_camera_{camera_index}_{uuid4().hex[:8]}.mp4"
+    started_at = started_at or datetime.now(timezone.utc)
+    date_dir = CAMERA_VIDEO_DIR / started_at.strftime("%Y%m%d")
+    file_name = f"{started_at.strftime('%H%M%S')}_camera_{camera_index}_{uuid4().hex[:8]}.mp4"
     date_dir.mkdir(parents=True, exist_ok=True)
     return date_dir / file_name
 
@@ -327,13 +332,20 @@ def record_camera_video_session(
     fps: float,
     frame_width: int,
     frame_height: int,
+    started_at: datetime | None = None,
+    ended_at: datetime | None = None,
+    partial: bool = False,
 ) -> None:
-    """记录一次摄像头录像会话元数据。"""
+    """记录一次已经完成封口的摄像头录像会话元数据。
 
-    started_at = datetime.now(timezone.utc).replace(microsecond=0)
-    ended_at = started_at + timedelta(seconds=CAMERA_VIDEO_SEGMENT_SECONDS)
-    start_time = started_at.isoformat().replace("+00:00", "Z")
-    end_time = ended_at.isoformat().replace("+00:00", "Z")
+    历史回放只应该检索已经完成写入的 MP4 片段。正在录制的片段尚未封口，
+    因此不提前写入对象索引。
+    """
+
+    started_at = started_at or datetime.now(timezone.utc).replace(microsecond=0)
+    ended_at = ended_at or datetime.now(timezone.utc).replace(microsecond=0)
+    start_time = started_at.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    end_time = ended_at.isoformat(timespec="milliseconds").replace("+00:00", "Z")
     append_jsonl(
         CAMERA_VIDEO_RECORD_FILE,
         {
@@ -345,6 +357,8 @@ def record_camera_video_session(
             "fps": fps,
             "frame_width": frame_width,
             "frame_height": frame_height,
+            "finalized": True,
+            "partial": partial,
         },
     )
     record_object_index(
@@ -358,5 +372,7 @@ def record_camera_video_session(
             "fps": fps,
             "frame_width": frame_width,
             "frame_height": frame_height,
+            "finalized": True,
+            "partial": partial,
         },
     )

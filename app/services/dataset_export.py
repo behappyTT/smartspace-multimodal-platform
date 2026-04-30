@@ -18,10 +18,30 @@ from app.storage import (
     CAMERA_VIDEO_RECORD_FILE,
     CAMERA_VIDEO_SEGMENT_SECONDS,
     EXPORT_DIR,
+    LEGACY_CAMERA_VIDEO_RECORD_FILE,
     RUNTIME_DATA_DIR,
     read_object_index,
     utc_now_iso,
 )
+
+
+def _iter_jsonl(path: Path) -> list[dict]:
+    """安全读取 JSONL，避免单行编码或格式问题拖垮整个导出接口。"""
+
+    if not path.exists():
+        return []
+
+    rows = []
+    with path.open("r", encoding="utf-8-sig") as file:
+        for line in file:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return rows
 
 
 def parse_query_time(value: datetime) -> datetime:
@@ -93,6 +113,8 @@ def query_sensor_rows(
 def _object_overlaps_window(item: dict, start_time: datetime, end_time: datetime) -> bool:
     """判断文件对象是否与导出时间窗口有交集。"""
 
+    start_time = parse_query_time(start_time)
+    end_time = parse_query_time(end_time)
     object_start = _parse_index_time(item.get("timestamp") or item.get("start_time") or item.get("indexed_at"))
     object_end = _parse_index_time(item.get("end_time"))
     if object_start is None:
@@ -114,35 +136,36 @@ def _iter_object_rows() -> list[dict]:
         for item in rows
         if item.get("object_type") == "camera_video_segment" and item.get("uri")
     }
-    if CAMERA_VIDEO_RECORD_FILE.exists():
-        with CAMERA_VIDEO_RECORD_FILE.open("r", encoding="utf-8") as file:
-            for line in file:
-                line = line.strip()
-                if not line:
-                    continue
-                item = json.loads(line)
-                file_path = item.get("file_path")
-                if not file_path or str(file_path) in indexed_video_paths:
-                    continue
-                rows.append(
-                    {
-                        "indexed_at": item.get("recorded_at"),
-                        "object_type": "camera_video_segment",
-                        "modality": "video",
-                        "uri": file_path,
-                        "timestamp": None,
-                        "start_time": item.get("start_time") or item.get("recorded_at"),
-                        "end_time": item.get("end_time"),
-                        "device_id": None,
-                        "metadata": {
-                            "camera_index": item.get("camera_index"),
-                            "fps": item.get("fps"),
-                            "frame_width": item.get("frame_width"),
-                            "frame_height": item.get("frame_height"),
-                            "source": "camera_video_records",
-                        },
-                    }
-                )
+    video_record_files = [CAMERA_VIDEO_RECORD_FILE]
+    if LEGACY_CAMERA_VIDEO_RECORD_FILE != CAMERA_VIDEO_RECORD_FILE:
+        video_record_files.append(LEGACY_CAMERA_VIDEO_RECORD_FILE)
+
+    for record_file in video_record_files:
+        for item in _iter_jsonl(record_file):
+            file_path = item.get("file_path")
+            if not file_path or str(file_path) in indexed_video_paths:
+                continue
+            rows.append(
+                {
+                    "indexed_at": item.get("recorded_at"),
+                    "object_type": "camera_video_segment",
+                    "modality": "video",
+                    "uri": file_path,
+                    "timestamp": None,
+                    "start_time": item.get("start_time") or item.get("recorded_at"),
+                    "end_time": item.get("end_time"),
+                    "device_id": None,
+                    "metadata": {
+                        "camera_index": item.get("camera_index"),
+                        "fps": item.get("fps"),
+                        "frame_width": item.get("frame_width"),
+                        "frame_height": item.get("frame_height"),
+                        "finalized": item.get("finalized"),
+                        "partial": item.get("partial"),
+                        "source": "camera_video_records",
+                    },
+                }
+            )
     return rows
 
 
@@ -193,6 +216,8 @@ def build_dataset_summary(
     该函数只统计数量和少量预览，不生成文件，适合前端先展示“可导出内容概览”。
     """
 
+    start_time = parse_query_time(start_time)
+    end_time = parse_query_time(end_time)
     sensor_rows = query_sensor_rows(db, start_time, end_time, device_type)
     object_rows = query_object_rows(start_time, end_time, device_type)
     return {
@@ -218,6 +243,8 @@ def create_aligned_dataset_zip(
     start_time 到 end_time 之间，就会被放入同一个数据包，供后续实验整理使用。
     """
 
+    start_time = parse_query_time(start_time)
+    end_time = parse_query_time(end_time)
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
     sensor_rows = query_sensor_rows(db, start_time, end_time, device_type)
     object_rows = query_object_rows(start_time, end_time, device_type)

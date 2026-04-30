@@ -26,6 +26,8 @@ smartspace-platform/
 │  ├─ services/                      # 业务服务模块，封装采集接入、标准化、导出和回溯逻辑
 │  │  ├─ dataset_export.py           # 数据查询与对齐导出服务，生成 CSV/JSON/manifest ZIP
 │  │  ├─ environment_analysis.py     # 空间环境状态分析服务，生成舒适度、运动适宜性和调整建议
+│  │  ├─ imu_activity.py             # IMU 活动识别服务，深度模型优先并提供规则兜底
+│  │  ├─ imu_deep_model.py           # 可选 1D-CNN + GRU/LSTM 推理模块，加载训练好的 WT901 模型
 │  │  ├─ knowledge_graph.py          # 轻量知识图谱服务，生成空间、设备、传感器和文件对象关系
 │  │  ├─ mqtt_listener.py            # MQTT 接入服务，接收树莓派等节点的持续上报
 │  │  ├─ normalizer.py               # 数据标准化服务，校验类型、统一时间并拆分 metrics 入库
@@ -54,7 +56,8 @@ smartspace-platform/
 │  ├─ source_audit/                  # 数据来源审计日志
 │  ├─ multimodal_index/              # 图片、视频、原始 JSON 等文件对象索引
 │  ├─ knowledge_graph/               # 知识图谱运行时快照
-│  └─ exports/                       # 对齐导出的多模态数据集 ZIP
+│  ├─ exports/                       # 对齐导出的多模态数据集 ZIP
+│  └─ models/                        # 可选深度学习模型文件，例如 imu_activity_cnn_gru.pt
 ├─ bluetooth_node/                   # 本机 WT901 蓝牙节点接入脚本
 │  ├─ collector.py                   # BLE 通知采集与加速度/角速度帧解析
 │  └─ uploader.py                    # 将 WT901 最新帧转换为统一 metrics 后上传到平台
@@ -62,7 +65,8 @@ smartspace-platform/
 │  ├─ collector.py                   # 真实传感器读取入口，预留 SEN0501/DHT22/BME280 接口
 │  └─ uploader.py                    # 环境数据上传脚本，支持 MQTT 和 HTTP 两种传输方式
 ├─ scripts/                          # 项目辅助脚本
-│  └─ init_db.py                     # 初始化数据库表、设备档案和传感器档案
+│  ├─ init_db.py                     # 初始化数据库表、设备档案和传感器档案
+│  └─ train_imu_cnn_gru.py           # 训练腰部佩戴 WT901 的 1D-CNN + GRU/LSTM 活动识别模型
 ├─ requirements.txt                  # Python 依赖清单
 ├─ run.py                            # 本地开发启动入口
 ├─ start.bat                         # Windows CMD 一键启动脚本
@@ -272,7 +276,7 @@ set SMARTSPACE_MQTT_TOPIC_PREFIX=smartspace/sensor/upload
 - `runtime_data/camera_frames/`
   存放摄像头后台定时抓拍图片和画面元数据，用于本地保存视频模态数据。
 - `runtime_data/camera_video/`
-  存放摄像头后台按 30 秒自动分段写入的 MP4 录像文件和录像会话元数据。
+  存放摄像头后台按整分钟自动分段写入的 MP4 录像文件、帧时间索引和录像会话元数据。
 - `runtime_data/normalized_records/`
   存放规范化后的 JSONL 记录，体现统一传感器结构和标准化时间格式。
 - `runtime_data/source_audit/`
@@ -287,7 +291,7 @@ set SMARTSPACE_MQTT_TOPIC_PREFIX=smartspace/sensor/upload
 - 数据库负责业务查询和页面展示
 - `standardized_data/` 负责本地标准化传感器数据落盘
 - `camera_video/` 负责本地保存连续 MP4 录像
-  默认每 30 秒生成一个独立 MP4；若服务提前停止，不足 30 秒的最后片段也会正常封口并保留
+  默认按整分钟生成独立 MP4；历史回放只使用已经封口并写入索引的完整片段，正在录制的当前分钟片段不参与回放
 - `camera_frames/` 负责本地保存摄像头画面数据
 - 文件目录负责原始数据留痕和来源追踪
 - `multimodal_index/` 负责索引非结构化文件对象，便于后续回放和导出
@@ -319,6 +323,41 @@ set SMARTSPACE_MQTT_TOPIC_PREFIX=smartspace/sensor/upload
   按指定时间点查询附近的环境数据、蓝牙运动数据和摄像头抓拍索引，用于历史回溯时间轴。
 - `/timeline/frame`
   返回指定时间点附近的摄像头抓拍图片。
+
+### 4.6 IMU 活动识别设计
+
+WT901 蓝牙节点建议固定在腰部位置，用于采集人体整体运动趋势。平台当前使用加速度 X/Y/Z 和角速度 X/Y/Z 六个通道构建滑动窗口，默认按 10Hz 回传节奏取最近 3 秒数据，即形成约 `30 x 6` 的 IMU 输入矩阵。
+
+活动识别采用“两层方案”：
+
+- 深度模型层：支持加载 `runtime_data/models/imu_activity_cnn_gru.pt`，模型结构为 1D-CNN 提取局部时序特征，再通过 GRU 或 LSTM 建模连续运动上下文。
+- 规则兜底层：当本地未安装 PyTorch、模型文件不存在或样本不足时，自动使用加速度波动、加速度峰值、角速度 RMS 和角速度峰值进行可解释规则识别。
+
+这样既能在答辩中体现较完整的智能分析路线，又不会因为模型文件缺失影响系统演示稳定性。
+
+训练自定义模型时，可准备带标签的腰部 WT901 CSV 数据，字段包括：
+
+```text
+timestamp,label,acceleration_x,acceleration_y,acceleration_z,angular_velocity_x,angular_velocity_y,angular_velocity_z
+```
+
+然后执行：
+
+```bash
+python scripts/train_imu_cnn_gru.py --csv runtime_data/labels/waist_imu.csv
+```
+
+训练完成后会默认生成：
+
+```text
+runtime_data/models/imu_activity_cnn_gru.pt
+```
+
+如果模型保存在其他路径，可通过环境变量指定：
+
+```bash
+set SMARTSPACE_IMU_MODEL_PATH=runtime_data/models/imu_activity_cnn_gru.pt
+```
 
 ### 4.5 数据库表结构
 
@@ -483,6 +522,7 @@ python scripts/init_db.py
 - `GET /dashboard/latest` 能返回当前最新环境指标
 - `GET /dashboard/latest-motion` 能返回当前最新加速度和角速度
 - `GET /analysis/environment` 能返回当前空间环境状态分析
+- `GET /analysis/imu-activity` 能返回 WT901 活动识别结果，并标明当前使用深度模型还是规则兜底
 - `GET /sensor-data/history` 能返回折线图所需历史数据
 
 ### 7.3 标准化上传验证
@@ -518,6 +558,7 @@ python bluetooth_node/uploader.py
 - 终端能看到 WT901 已连接提示
 - 后端 `POST /sensor-data/upload` 返回 `stored_count = 6`
 - 前端蓝牙运动信息区域会按约 10Hz 自动刷新
+- 前端 IMU 活动识别区域会基于最近 3 秒窗口给出静止、轻微运动、持续活动、剧烈运动等状态
 - `runtime_data/standardized_data/` 中出现加速度和角速度标准化记录
 
 ### 7.5 摄像头视频流验证

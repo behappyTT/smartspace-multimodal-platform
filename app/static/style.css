@@ -170,6 +170,7 @@ body {
 .playback-panel,
 .chart-panel,
 .motion-panel,
+.imu-panel,
 .analysis-panel {
     grid-column: span 1;
 }
@@ -177,6 +178,7 @@ body {
 .playback-panel,
 .chart-panel,
 .motion-panel,
+.imu-panel,
 .analysis-panel {
     /* 历史图跨整行展示，保证横向空间充足。 */
     grid-column: 1 / -1;
@@ -448,6 +450,109 @@ body {
     font-size: 15px;
 }
 
+.imu-panel {
+    background:
+        linear-gradient(135deg, rgba(20, 108, 148, 0.06), rgba(25, 124, 114, 0.08)),
+        var(--panel);
+}
+
+.imu-layout {
+    display: grid;
+    grid-template-columns: 260px minmax(0, 1fr) 1.2fr;
+    gap: 18px;
+    align-items: stretch;
+}
+
+.imu-status-card,
+.imu-summary-card,
+.imu-feature-grid {
+    border: 1px solid rgba(20, 108, 148, 0.12);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.74);
+    box-shadow: 0 12px 24px rgba(31, 41, 55, 0.06);
+}
+
+.imu-status-card {
+    display: grid;
+    align-content: center;
+    gap: 10px;
+    min-height: 176px;
+    padding: 24px;
+}
+
+.imu-status-card p,
+.imu-status-card span {
+    margin: 0;
+    color: var(--muted);
+}
+
+.imu-status-card strong {
+    color: var(--primary);
+    font-size: 34px;
+    line-height: 1.2;
+}
+
+.imu-status-card[data-level="still"] strong {
+    color: #197c72;
+}
+
+.imu-status-card[data-level="medium"] strong,
+.imu-status-card[data-level="high"] strong,
+.imu-status-card[data-level="impact"] strong {
+    color: #b45309;
+}
+
+.imu-summary-card {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 24px;
+    font-size: 18px;
+    line-height: 1.7;
+}
+
+.imu-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.imu-tags span {
+    padding: 9px 12px;
+    border-radius: 999px;
+    color: var(--primary);
+    background: rgba(20, 108, 148, 0.1);
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.imu-feature-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1px;
+    overflow: hidden;
+}
+
+.imu-feature {
+    display: grid;
+    align-content: center;
+    gap: 10px;
+    min-height: 86px;
+    padding: 18px;
+    background: rgba(255, 255, 255, 0.68);
+}
+
+.imu-feature span {
+    color: var(--muted);
+    font-size: 14px;
+}
+
+.imu-feature strong {
+    color: var(--text);
+    font-size: 26px;
+}
+
 .analysis-panel {
     overflow: hidden;
     background:
@@ -576,7 +681,9 @@ body {
     }
 
     .metric-grid,
-    .analysis-layout {
+    .analysis-layout,
+    .imu-layout,
+    .imu-feature-grid {
         grid-template-columns: 1fr;
     }
 }

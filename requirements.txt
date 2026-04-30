@@ -18,3 +18,6 @@ paho-mqtt==1.6.1
 bleak==0.22.3
 # OpenCV 依赖，用于图像矩阵处理
 numpy==2.2.5
+# 深度学习框架，用于训练和加载 WT901 腰部 IMU 活动识别模型
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.5.1+cpu

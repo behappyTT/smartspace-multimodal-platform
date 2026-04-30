@@ -15,11 +15,32 @@ from sqlalchemy.orm import Session
 from app import constants, crud, models
 from app.storage import (
     CAMERA_FRAME_RECORD_FILE,
+    CAMERA_VIDEO_DIR,
     CAMERA_VIDEO_RECORD_FILE,
     CAMERA_VIDEO_SEGMENT_SECONDS,
+    LEGACY_CAMERA_VIDEO_RECORD_FILE,
     RUNTIME_DATA_DIR,
     read_object_index,
 )
+
+
+def _iter_jsonl(path: Path) -> list[dict]:
+    """安全读取 JSONL，兼容带 BOM 文件并跳过异常行。"""
+
+    if not path.exists():
+        return []
+
+    rows = []
+    with path.open("r", encoding="utf-8-sig") as file:
+        for line in file:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return rows
 
 
 # 回溯时允许匹配目标时间前后 5 分钟内的数据。
@@ -148,20 +169,14 @@ def _iter_camera_frame_records() -> list[dict]:
                 }
             )
 
-    if CAMERA_FRAME_RECORD_FILE.exists():
-        with CAMERA_FRAME_RECORD_FILE.open("r", encoding="utf-8") as file:
-            for line in file:
-                line = line.strip()
-                if not line:
-                    continue
-                item = json.loads(line)
-                records.append(
-                    {
-                        "timestamp": item.get("recorded_at"),
-                        "frame_path": item.get("frame_path"),
-                        "source": "camera_frame_records",
-                    }
-                )
+    for item in _iter_jsonl(CAMERA_FRAME_RECORD_FILE):
+        records.append(
+            {
+                "timestamp": item.get("recorded_at"),
+                "frame_path": item.get("frame_path"),
+                "source": "camera_frame_records",
+            }
+        )
     return records
 
 
@@ -219,35 +234,127 @@ def _iter_camera_video_records() -> list[dict]:
                     "end_time": item.get("end_time"),
                     "video_path": item.get("uri"),
                     "fps": metadata.get("fps"),
+                    "finalized": metadata.get("finalized"),
+                    "partial": metadata.get("partial"),
                     "source": "object_index",
                 }
             )
 
-    if CAMERA_VIDEO_RECORD_FILE.exists():
-        with CAMERA_VIDEO_RECORD_FILE.open("r", encoding="utf-8") as file:
-            for line in file:
-                line = line.strip()
-                if not line:
-                    continue
-                item = json.loads(line)
-                records.append(
-                    {
-                        "start_time": item.get("start_time") or item.get("recorded_at"),
-                        "end_time": item.get("end_time"),
-                        "video_path": item.get("file_path"),
-                        "fps": item.get("fps"),
-                        "source": "camera_video_records",
-                    }
-                )
+    video_record_files = [CAMERA_VIDEO_RECORD_FILE]
+    if LEGACY_CAMERA_VIDEO_RECORD_FILE != CAMERA_VIDEO_RECORD_FILE:
+        video_record_files.append(LEGACY_CAMERA_VIDEO_RECORD_FILE)
+
+    for record_file in video_record_files:
+        for item in _iter_jsonl(record_file):
+            records.append(
+                {
+                    "start_time": item.get("start_time") or item.get("recorded_at"),
+                    "end_time": item.get("end_time"),
+                    "video_path": item.get("file_path"),
+                    "fps": item.get("fps"),
+                    "finalized": item.get("finalized"),
+                    "partial": item.get("partial"),
+                    "source": "camera_video_records",
+                }
+            )
+    indexed_paths = {
+        str(Path(record["video_path"]).resolve())
+        for record in records
+        if record.get("video_path") and Path(record["video_path"]).exists()
+    }
+    for scanned_record in _iter_camera_video_file_records():
+        video_path = scanned_record.get("video_path")
+        if not video_path:
+            continue
+        resolved_path = str(Path(video_path).resolve())
+        if resolved_path in indexed_paths:
+            continue
+        records.append(scanned_record)
+        indexed_paths.add(resolved_path)
     return records
+
+
+def _iter_camera_video_file_records() -> list[dict]:
+    """从 camera_video 目录兜底扫描 MP4 分段。
+
+    正常情况下历史回放依赖 object_index/camera_video_records 中的元数据。
+    如果服务运行中因为旧版本或异常没有写入索引，这里会根据文件名中的
+    UTC 时间戳和文件修改时间推断已完成片段，避免“文件存在但回放找不到”。
+    """
+
+    candidates = []
+    for video_path in CAMERA_VIDEO_DIR.glob("*/*_camera_*_*.mp4"):
+        if ".recording" in video_path.name:
+            continue
+        if not video_path.is_file() or video_path.stat().st_size <= 1024:
+            continue
+        if not _has_mp4_moov_atom(video_path):
+            continue
+        date_text = video_path.parent.name
+        time_text = video_path.name.split("_", 1)[0]
+        try:
+            start_time = datetime.strptime(f"{date_text}{time_text}", "%Y%m%d%H%M%S")
+        except ValueError:
+            continue
+        modified_time = datetime.fromtimestamp(video_path.stat().st_mtime, timezone.utc).replace(tzinfo=None)
+        nominal_end_time = start_time + timedelta(seconds=CAMERA_VIDEO_SEGMENT_SECONDS)
+        end_time = min(nominal_end_time, modified_time) if modified_time > start_time else nominal_end_time
+        duration_seconds = (end_time - start_time).total_seconds()
+        if duration_seconds <= 0:
+            continue
+        capture = cv2.VideoCapture(str(video_path))
+        try:
+            if not capture.isOpened() or int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0) <= 0:
+                continue
+        finally:
+            capture.release()
+        candidates.append((start_time, end_time, video_path))
+
+    records = []
+    for start_time, end_time, video_path in sorted(candidates, key=lambda item: item[0]):
+        records.append(
+            {
+                "start_time": crud.format_utc_timestamp(start_time),
+                "end_time": crud.format_utc_timestamp(end_time),
+                "video_path": str(video_path),
+                "fps": None,
+                "finalized": True,
+                "partial": (end_time - start_time).total_seconds() < CAMERA_VIDEO_SEGMENT_SECONDS * 0.95,
+                "source": "camera_video_scan",
+            }
+        )
+    return records
+
+
+def _has_mp4_moov_atom(video_path: Path) -> bool:
+    """快速判断 MP4 是否已经正常封口。
+
+    未 release 的 MP4 通常缺少 moov atom，直接交给 OpenCV 打开会产生
+    `moov atom not found` 警告，也不应该参与历史回放。
+    """
+
+    try:
+        size = video_path.stat().st_size
+        with video_path.open("rb") as file:
+            head = file.read(min(size, 1024 * 1024))
+            if b"moov" in head:
+                return True
+            if size > 1024 * 1024:
+                file.seek(max(size - 1024 * 1024, 0))
+                return b"moov" in file.read()
+        return False
+    except OSError:
+        return False
 
 
 def find_nearest_camera_video_segment(target_time: datetime) -> dict | None:
     """查找覆盖或最接近指定时间的摄像头 MP4 分段录像。"""
 
+    target_time = parse_timeline_time(target_time)
     best: dict | None = None
     best_delta: float | None = None
     runtime_root = RUNTIME_DATA_DIR.resolve()
+    now_utc = datetime.utcnow()
 
     for record in _iter_camera_video_records():
         start_time = _parse_index_time(record.get("start_time"))
@@ -258,6 +365,9 @@ def find_nearest_camera_video_segment(target_time: datetime) -> dict | None:
         if end_time is None:
             # 兼容旧版本记录：没有 end_time 时按当前配置的分段长度估算。
             end_time = start_time + timedelta(seconds=CAMERA_VIDEO_SEGMENT_SECONDS)
+        if record.get("finalized") is False or end_time >= now_utc:
+            # 正在录制或尚未完成封口的片段不参与历史回放。
+            continue
 
         path = Path(video_path)
         if not path.exists() or path.stat().st_size <= 0:
@@ -267,15 +377,11 @@ def find_nearest_camera_video_segment(target_time: datetime) -> dict | None:
         if runtime_root not in resolved.parents:
             continue
 
-        if start_time <= target_time <= end_time:
-            delta = 0.0
-        elif target_time < start_time:
-            delta = (start_time - target_time).total_seconds()
-        else:
-            delta = (target_time - end_time).total_seconds()
-
-        if delta > MAX_TIMELINE_DELTA_SECONDS:
+        if not (start_time <= target_time < end_time):
+            # 视频回放必须严格覆盖目标时刻，不能用相邻分钟片段凑数，
+            # 否则会出现“时间轴到 19:37，却播放 19:36 视频”的错位。
             continue
+        delta = 0.0
         if best_delta is not None and delta >= best_delta:
             continue
 
@@ -288,12 +394,38 @@ def find_nearest_camera_video_segment(target_time: datetime) -> dict | None:
             "end_time": crud.format_utc_timestamp(end_time),
             "video_path": str(resolved),
             "source": record.get("source"),
+            "finalized": record.get("finalized"),
+            "partial": record.get("partial"),
             "delta_seconds": delta,
             "offset_seconds": offset_seconds,
             "segment_key": f"{resolved.name}:{start_time.isoformat()}",
         }
 
     return best
+
+
+def _seek_video_capture_by_offset(capture: cv2.VideoCapture, video_segment: dict) -> None:
+    """按目标时间在当前 MP4 分段中的秒偏移定位。
+
+    当前录像逻辑直接使用 VideoWriter 写入 MP4，因此不再额外维护帧级索引。
+    历史回放只需要根据片段起止时间计算 offset，然后让 OpenCV 定位到对应位置。
+    """
+
+    frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    if frame_count <= 1:
+        capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        return
+
+    start_time = _parse_index_time(video_segment.get("start_time"))
+    end_time = _parse_index_time(video_segment.get("end_time"))
+    if start_time is not None and end_time is not None:
+        duration_seconds = max((end_time - start_time).total_seconds(), 1.0)
+    else:
+        duration_seconds = max(float(video_segment.get("offset_seconds") or 0), 1.0)
+
+    offset_seconds = min(max(float(video_segment.get("offset_seconds") or 0), 0.0), duration_seconds)
+    frame_index = min(max(round((offset_seconds / duration_seconds) * (frame_count - 1)), 0), frame_count - 1)
+    capture.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
 
 
 def read_camera_video_frame(target_time: datetime) -> bytes | None:
@@ -307,7 +439,7 @@ def read_camera_video_frame(target_time: datetime) -> bytes | None:
     try:
         if not capture.isOpened():
             return None
-        capture.set(cv2.CAP_PROP_POS_MSEC, float(video_segment["offset_seconds"] or 0) * 1000)
+        _seek_video_capture_by_offset(capture, video_segment)
         ok, frame = capture.read()
         if not ok or frame is None:
             return None
@@ -320,44 +452,82 @@ def read_camera_video_frame(target_time: datetime) -> bytes | None:
 
 
 def historical_camera_mjpeg_stream(target_time: datetime) -> Generator[bytes, None, None]:
-    """把历史 MP4 分段转成 MJPEG 流，供前端像实时摄像头一样播放。"""
+    """把历史 MP4 分段转成连续 MJPEG 流。
 
-    video_segment = find_nearest_camera_video_segment(target_time)
-    if not video_segment or not video_segment.get("video_path"):
-        return
+    前端只请求一次目标时间，后端从该时间所属的本地 MP4 分段开始输出；
+    当前分段播完后，继续寻找下一个相邻分段并无缝输出。这样前端不需要在
+    每分钟边界主动切换视频流，避免“上一段还没播完，下一段已经被加载”的错位。
+    """
 
-    capture = cv2.VideoCapture(video_segment["video_path"])
-    try:
-        if not capture.isOpened():
+    initial_playback_time = parse_timeline_time(target_time)
+    stream_started_at = time.monotonic()
+    current_time = initial_playback_time
+    last_segment_key = None
+    while True:
+        video_segment = find_nearest_camera_video_segment(current_time)
+        if not video_segment or not video_segment.get("video_path"):
             return
+        if video_segment.get("segment_key") == last_segment_key:
+            return
+        last_segment_key = video_segment.get("segment_key")
 
-        metadata_fps = capture.get(cv2.CAP_PROP_FPS) or 12
-        frame_count = capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0
-        start_time = _parse_index_time(video_segment.get("start_time"))
-        end_time = _parse_index_time(video_segment.get("end_time"))
-        duration_seconds = (
-            max((end_time - start_time).total_seconds(), 1.0)
-            if start_time is not None and end_time is not None
-            else max(frame_count / metadata_fps, 1.0)
-        )
-        effective_fps = frame_count / duration_seconds if frame_count > 0 else metadata_fps
-        # OpenCV 写出的 MP4 元数据帧率可能偏低；按片段实际帧数估算能避免历史流被慢放。
-        frame_delay = 1 / max(min(effective_fps, 30), 1)
-        capture.set(cv2.CAP_PROP_POS_MSEC, float(video_segment["offset_seconds"] or 0) * 1000)
-        while True:
-            ok, frame = capture.read()
-            if not ok or frame is None:
-                break
-            ok, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
-            if not ok:
-                break
-            yield (
-                b"--frame\r\n"
-                b"Content-Type: image/jpeg\r\n\r\n" + jpeg.tobytes() + b"\r\n"
+        capture = cv2.VideoCapture(video_segment["video_path"])
+        try:
+            if not capture.isOpened():
+                return
+
+            metadata_fps = capture.get(cv2.CAP_PROP_FPS) or 12
+            frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+            start_time = _parse_index_time(video_segment.get("start_time"))
+            end_time = _parse_index_time(video_segment.get("end_time"))
+            duration_seconds = (
+                max((end_time - start_time).total_seconds(), 1.0)
+                if start_time is not None and end_time is not None
+                else max(frame_count / metadata_fps, 1.0)
             )
-            time.sleep(frame_delay)
-    finally:
-        capture.release()
+            effective_fps = frame_count / duration_seconds if frame_count > 0 else metadata_fps
+            # OpenCV 写出的 MP4 元数据帧率可能偏低；按片段实际帧数估算能避免历史流被慢放。
+            frame_delay = 1 / max(min(effective_fps, 30), 1)
+            _seek_video_capture_by_offset(capture, video_segment)
+            while True:
+                frame_index = int(capture.get(cv2.CAP_PROP_POS_FRAMES) or 0)
+                if start_time is not None and frame_count > 1:
+                    frame_offset = (frame_index / max(frame_count - 1, 1)) * duration_seconds
+                    frame_time = start_time + timedelta(seconds=frame_offset)
+                else:
+                    frame_time = current_time + timedelta(seconds=frame_index * frame_delay)
+
+                expected_elapsed = max((frame_time - initial_playback_time).total_seconds(), 0.0)
+                actual_elapsed = time.monotonic() - stream_started_at
+                # MJPEG 是服务端逐帧编码输出的；如果编码或浏览器读取让服务端落后，
+                # 继续逐帧补播会在分钟边界形成明显错位。这里跳过已经明显落后的帧，
+                # 让历史视频时间尽量贴近时间轴，而不是越播越慢。
+                if actual_elapsed - expected_elapsed > max(frame_delay * 2, 0.25):
+                    if capture.grab():
+                        continue
+                    break
+
+                ok, frame = capture.read()
+                if not ok or frame is None:
+                    break
+                ok, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                if not ok:
+                    break
+                yield (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n\r\n" + jpeg.tobytes() + b"\r\n"
+                )
+                next_due_at = stream_started_at + expected_elapsed + frame_delay
+                sleep_seconds = next_due_at - time.monotonic()
+                if sleep_seconds > 0:
+                    time.sleep(sleep_seconds)
+        finally:
+            capture.release()
+
+        if end_time is None:
+            return
+        # 下一轮从下一段开头继续找，增加 1ms 防止再次命中同一个 [start, end) 分段。
+        current_time = end_time + timedelta(milliseconds=1)
 
 
 def build_timeline_state(db: Session, target_time: datetime) -> dict:

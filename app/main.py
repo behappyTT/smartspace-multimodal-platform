@@ -20,6 +20,7 @@ from app import constants, crud, models, schemas
 from app.database import engine, get_db
 from app.services.dataset_export import build_dataset_summary, create_aligned_dataset_zip, parse_query_time
 from app.services.environment_analysis import build_latest_environment_analysis
+from app.services.imu_activity import build_imu_activity_analysis
 from app.services.knowledge_graph import build_knowledge_graph, write_knowledge_graph_snapshot
 from app.services.mqtt_listener import mqtt_ingestion_service
 from app.services.normalizer import process_upload, validate_device_type, validate_sensor_type
@@ -192,6 +193,17 @@ def environment_analysis(db: Session = Depends(get_db)):
     return build_latest_environment_analysis(db)
 
 
+@app.get("/analysis/imu-activity")
+def imu_activity_analysis(
+    timestamp: datetime | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """基于 WT901 最近时间窗口生成 IMU 活动识别结果。"""
+
+    target_time = parse_timeline_time(timestamp) if timestamp else None
+    return build_imu_activity_analysis(db, target_time)
+
+
 @app.get("/dashboard/latest-motion", response_model=schemas.DashboardLatestResponse)
 def dashboard_latest_motion(
     device_id: int | None = Query(default=None),
@@ -321,6 +333,28 @@ def timeline_sensors(
     return build_timeline_sensor_state(db, target_time)
 
 
+@app.get("/timeline/environment")
+def timeline_environment(
+    timestamp: datetime = Query(...),
+    db: Session = Depends(get_db),
+):
+    """查询指定时刻附近的环境节点状态。"""
+
+    target_time = parse_timeline_time(timestamp)
+    return build_timeline_sensor_state(db, target_time)["environment"]
+
+
+@app.get("/timeline/motion")
+def timeline_motion(
+    timestamp: datetime = Query(...),
+    db: Session = Depends(get_db),
+):
+    """查询指定时刻附近的 WT901 运动状态。"""
+
+    target_time = parse_timeline_time(timestamp)
+    return build_timeline_sensor_state(db, target_time)["motion"]
+
+
 @app.get("/timeline/frame")
 def timeline_frame(
     timestamp: datetime = Query(...),
@@ -382,4 +416,8 @@ def video_feed():
     return StreamingResponse(
         mjpeg_stream(),
         media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+        },
     )

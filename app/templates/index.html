@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>面向智能空间的多模态感知数据采集系统和分析平台</title>
-    <link rel="stylesheet" href="/static/style.css?v=20260427-env-analysis-1">
+    <link rel="stylesheet" href="/static/style.css?v=20260428-imu-deep-1">
     <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 </head>
 <body>
@@ -57,10 +57,10 @@
                     </div>
                     <div class="playback-actions">
                         <label class="playback-window-picker">
-                            回溯小时段
-                            <input id="playback-window-time" type="datetime-local" step="3600">
+                            回溯分钟段
+                            <input id="playback-window-time" type="datetime-local" step="60">
                         </label>
-                        <button type="button" id="playback-window-button">跳转小时段</button>
+                        <button type="button" id="playback-window-button">跳转分钟段</button>
                         <button type="button" id="playback-toggle-button">▶ 继续回放</button>
                         <button type="button" id="playback-live-button">回到实时</button>
                     </div>
@@ -186,6 +186,47 @@
                 </div>
             </section>
 
+            <!-- IMU 活动识别区域 -->
+            <section class="panel imu-panel">
+                <div class="panel-header">
+                    <h2>IMU 活动识别</h2>
+                    <span id="imu-analysis-time">等待 WT901 数据...</span>
+                </div>
+                <div class="imu-layout">
+                    <div class="imu-status-card" id="imu-status-card">
+                        <p>当前活动状态</p>
+                        <strong id="imu-activity-label">暂无数据</strong>
+                        <span id="imu-confidence">置信度 --</span>
+                    </div>
+                    <div class="imu-summary-card">
+                        <div id="imu-summary">等待最近 3 秒内的连续 IMU 数据后生成活动识别结果。</div>
+                        <div class="imu-tags">
+                            <span id="imu-window-tag">窗口：1.2 s</span>
+                            <span id="imu-sample-tag">样本：0</span>
+                            <span id="imu-model-tag">规则模型参考：等待数据</span>
+                        </div>
+                    </div>
+                    <div class="imu-feature-grid">
+                        <div class="imu-feature">
+                            <span>动态加速度波动</span>
+                            <strong id="imu-acc-std">--</strong>
+                        </div>
+                        <div class="imu-feature">
+                            <span>动态加速度峰值</span>
+                            <strong id="imu-acc-peak">--</strong>
+                        </div>
+                        <div class="imu-feature">
+                            <span>角速度 RMS</span>
+                            <strong id="imu-gyro-rms">--</strong>
+                        </div>
+                        <div class="imu-feature">
+                            <span>角速度峰值</span>
+                            <strong id="imu-gyro-peak">--</strong>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
             <!-- 空间环境状态分析区域 -->
             <section class="panel analysis-panel">
                 <div class="panel-header">
@@ -229,14 +270,24 @@
         let playbackStartTime = new Date(Date.now() - 60 * 60 * 1000);
         let playbackEndTime = new Date();
         let playbackRequestTimer = null;
-        let playbackPlayTimer = null;
-        let playbackEnvironmentTimer = null;
+        let playbackClockTimer = null;
+        let playbackCameraTimer = null;
         let playbackMotionTimer = null;
+        let playbackEnvironmentTimer = null;
         let playbackPlaying = false;
         let playbackLoading = false;
-        let playbackSensorsLoading = false;
+        let playbackMotionLoading = false;
+        let playbackEnvironmentLoading = false;
+        let imuActivityLoading = false;
+        let lastPlaybackImuUpdateAt = 0;
+        let lastPlaybackCameraFrameLoadedAt = 0;
+        let cameraFrameRequestId = 0;
+        let cameraFrameObjectUrl = null;
+        let cameraPlaybackMode = false;
+        let cameraStreamSegmentKey = null;
         const PLAYBACK_STEP_SECONDS = 0.1;
         const PLAYBACK_TICK_MS = 100;
+        const CAMERA_STREAM_CHECK_MS = 1000;
         const ENV_METRIC_CONFIG = {
             temperature: { valueId: "temperature-value", timeId: "temperature-time", digits: 2 },
             humidity: { valueId: "humidity-value", timeId: "humidity-time", digits: 2 },
@@ -359,15 +410,21 @@
             return normalized;
         }
 
+        function normalizeToMinuteStart(date) {
+            const normalized = new Date(date);
+            normalized.setSeconds(0, 0);
+            return normalized;
+        }
+
         function updateRealtimeTimeline() {
             if (playbackMode) {
                 return;
             }
             const now = new Date();
             const { startTime, endTime } = getHourWindow(now);
-            const elapsedSeconds = Math.floor((now - startTime) / 1000);
+            const elapsedSeconds = (now - startTime) / 1000;
             setPlaybackWindow(startTime, endTime, elapsedSeconds);
-            document.getElementById("playback-window-time").value = toLocalDateTimeInputValue(startTime);
+            document.getElementById("playback-window-time").value = toLocalDateTimeInputValue(normalizeToMinuteStart(now));
             setPlaybackStatus("实时模式");
         }
 
@@ -376,18 +433,20 @@
             updateRealtimeTimeline();
         }
 
-        function jumpToPlaybackHourWindow() {
+        function jumpToPlaybackMinuteWindow() {
             const value = document.getElementById("playback-window-time").value;
             if (!value) {
-                setPlaybackStatus("请先选择回溯小时段");
+                setPlaybackStatus("请先选择回溯分钟段");
                 return;
             }
             stopPlaybackAutoRun();
             playbackMode = true;
             setPlaybackToggleLabel();
-            const startTime = normalizeToHourStart(new Date(value));
+            const selectedTime = normalizeToMinuteStart(new Date(value));
+            const startTime = normalizeToHourStart(selectedTime);
             const endTime = new Date(startTime.getTime() + 60 * 60 * 1000);
-            setPlaybackWindow(startTime, endTime, 0);
+            const selectedOffsetSeconds = (selectedTime - startTime) / 1000;
+            setPlaybackWindow(startTime, endTime, selectedOffsetSeconds);
             loadPlaybackState();
         }
 
@@ -415,6 +474,10 @@
         function showCameraImage(src, statusText) {
             const frame = document.getElementById("camera-frame");
             const video = document.getElementById("camera-video");
+            if (cameraFrameObjectUrl) {
+                URL.revokeObjectURL(cameraFrameObjectUrl);
+                cameraFrameObjectUrl = null;
+            }
             video.pause();
             video.hidden = true;
             video.removeAttribute("src");
@@ -422,21 +485,139 @@
             video.load();
             frame.hidden = false;
             frame.src = src;
+            cameraPlaybackMode = false;
+            cameraStreamSegmentKey = null;
             document.getElementById("camera-status").textContent = statusText;
         }
 
-        function showPlaybackVideo(cameraVideo, targetTime) {
+        function enterPlaybackCameraMode(statusText = "历史帧加载中...") {
             const frame = document.getElementById("camera-frame");
             const video = document.getElementById("camera-video");
+            if (cameraPlaybackMode) {
+                return;
+            }
             video.pause();
             video.hidden = true;
             video.removeAttribute("src");
             video.load();
-
-            const endpoint = playbackPlaying ? "video_feed" : "video_frame";
             frame.hidden = false;
-            frame.src = `/timeline/${endpoint}?timestamp=${encodeURIComponent(targetTime)}&cache=${Date.now()}`;
-            updateCameraPlaybackStatus(targetTime);
+            if (!frame.src.startsWith("blob:")) {
+                frame.src = buildCameraPlaceholder(statusText);
+            }
+            cameraPlaybackMode = true;
+        }
+
+        function setImageSource(src) {
+            const frame = document.getElementById("camera-frame");
+            frame.src = "";
+            window.setTimeout(() => {
+                frame.src = src;
+            }, 0);
+        }
+
+        function setImageSourceAndWait(src, timeoutMs = 5000) {
+            const frame = document.getElementById("camera-frame");
+            frame.src = "";
+            return new Promise((resolve) => {
+                let finished = false;
+                let timeoutId = null;
+
+                const cleanup = () => {
+                    frame.removeEventListener("load", handleLoad);
+                    frame.removeEventListener("error", handleError);
+                    if (timeoutId) {
+                        window.clearTimeout(timeoutId);
+                    }
+                };
+                const finish = (ok) => {
+                    if (finished) {
+                        return;
+                    }
+                    finished = true;
+                    cleanup();
+                    resolve(ok);
+                };
+                const handleLoad = () => finish(true);
+                const handleError = () => finish(false);
+
+                frame.addEventListener("load", handleLoad);
+                frame.addEventListener("error", handleError);
+                timeoutId = window.setTimeout(() => finish(false), timeoutMs);
+                window.setTimeout(() => {
+                    frame.src = src;
+                }, 0);
+            });
+        }
+
+        async function loadPlaybackCameraFrame(targetTime, force = false) {
+            const frame = document.getElementById("camera-frame");
+            const video = document.getElementById("camera-video");
+            const targetDate = targetTime instanceof Date ? targetTime : new Date(targetTime);
+            const now = Date.now();
+            if (!force && now - lastPlaybackCameraFrameLoadedAt < 250) {
+                updateCameraPlaybackStatus(targetDate);
+                return;
+            }
+            lastPlaybackCameraFrameLoadedAt = now;
+            const requestId = ++cameraFrameRequestId;
+
+            enterPlaybackCameraMode("历史帧加载中...");
+            updateCameraPlaybackStatus(targetDate);
+
+            try {
+                const params = new URLSearchParams({
+                    timestamp: targetDate.toISOString(),
+                    cache: String(Date.now()),
+                });
+                const response = await fetch(`/timeline/video_frame?${params.toString()}`);
+                if (!response.ok) {
+                    throw new Error(await response.text());
+                }
+                const blob = await response.blob();
+                if (requestId !== cameraFrameRequestId) {
+                    return;
+                }
+                if (cameraFrameObjectUrl) {
+                    URL.revokeObjectURL(cameraFrameObjectUrl);
+                }
+                cameraFrameObjectUrl = URL.createObjectURL(blob);
+                setImageSource(cameraFrameObjectUrl);
+            } catch (error) {
+                console.error("加载历史视频帧失败", error);
+                if (requestId === cameraFrameRequestId) {
+                    showCameraImage(buildCameraPlaceholder("该时间附近暂无历史视频帧"), "该时间附近暂无历史视频帧");
+                }
+            }
+        }
+
+        async function startPlaybackCameraStream(cameraVideo, targetTime) {
+            if (!cameraVideo?.available) {
+                showCameraImage(buildCameraPlaceholder("该时间附近暂无历史视频片段"), "该时间附近暂无历史视频片段");
+                return false;
+            }
+            const targetDate = targetTime instanceof Date ? targetTime : new Date(targetTime);
+            const frame = document.getElementById("camera-frame");
+            const video = document.getElementById("camera-video");
+            if (cameraFrameObjectUrl) {
+                URL.revokeObjectURL(cameraFrameObjectUrl);
+                cameraFrameObjectUrl = null;
+            }
+            cameraPlaybackMode = true;
+            video.pause();
+            video.hidden = true;
+            video.removeAttribute("src");
+            video.dataset.segmentKey = "";
+            video.load();
+            frame.hidden = false;
+            cameraStreamSegmentKey = cameraVideo.segment_key;
+            const streamUrl = `/timeline/video_feed?timestamp=${encodeURIComponent(targetDate.toISOString())}&cache=${Date.now()}`;
+            document.getElementById("camera-status").textContent = `历史视频定位中：${formatTime(targetDate)}`;
+            const loaded = await setImageSourceAndWait(streamUrl);
+            updateCameraPlaybackStatus(targetDate);
+            if (!loaded) {
+                showCameraImage(buildCameraPlaceholder("历史视频流加载超时"), "历史视频流加载超时");
+            }
+            return loaded;
         }
 
         function updateCameraPlaybackStatus(targetTime) {
@@ -703,6 +884,43 @@
             document.getElementById("gyr-time").textContent = formatTime(gyrTime);
         }
 
+        function formatImuFeature(value, digits = 3) {
+            if (value === null || value === undefined || Number.isNaN(Number(value))) {
+                return "--";
+            }
+            return Number(value).toFixed(digits);
+        }
+
+        function updateImuActivity(activityData) {
+            const levelText = {
+                still: "静止",
+                low: "轻微",
+                medium: "活动",
+                high: "剧烈",
+                impact: "冲击",
+                unknown: "未知",
+            };
+            const statusCard = document.getElementById("imu-status-card");
+            statusCard.dataset.level = activityData.level || "unknown";
+            document.getElementById("imu-activity-label").textContent = activityData.activity || "暂无数据";
+            document.getElementById("imu-confidence").textContent = `置信度 ${Math.round((activityData.confidence || 0) * 100)}%`;
+            document.getElementById("imu-summary").textContent = activityData.summary || "等待最近 1 秒左右的连续 IMU 数据后生成活动识别结果。";
+            document.getElementById("imu-window-tag").textContent = `窗口：${Number(activityData.window_seconds || 3).toFixed(1)} s`;
+            document.getElementById("imu-sample-tag").textContent = `样本：${activityData.sample_count || 0}`;
+            const ruleReference = activityData.rule_reference || {};
+            const ruleActivity = ruleReference.activity || "暂无数据";
+            const ruleConfidence = Math.round((ruleReference.confidence || 0) * 100);
+            document.getElementById("imu-model-tag").textContent = `规则模型参考：${ruleActivity}（${ruleConfidence}%）`;
+            document.getElementById("imu-analysis-time").textContent = activityData.generated_at ? `识别时间：${formatTime(activityData.generated_at)}` : "等待 WT901 数据...";
+
+            const features = activityData.features || {};
+            document.getElementById("imu-acc-std").textContent = formatImuFeature(features.acc_dynamic_std, 4);
+            document.getElementById("imu-acc-peak").textContent = formatImuFeature(features.acc_dynamic_peak, 4);
+            document.getElementById("imu-gyro-rms").textContent = formatImuFeature(features.gyro_rms, 2);
+            document.getElementById("imu-gyro-peak").textContent = formatImuFeature(features.gyro_peak, 2);
+            statusCard.setAttribute("aria-label", `IMU 活动识别：${levelText[activityData.level] || "未知"}`);
+        }
+
         function updateChart(historyData) {
             // 从后端历史数据中拆出温度和湿度两条曲线。
             const temperatureSeries = historyData.series.find(item => item.sensor_type === "temperature");
@@ -812,6 +1030,48 @@
             }
         }
 
+        async function refreshImuActivityDashboard() {
+            if (playbackMode || imuActivityLoading) {
+                return;
+            }
+            imuActivityLoading = true;
+            try {
+                const response = await fetch("/analysis/imu-activity");
+                if (!response.ok) {
+                    throw new Error(await response.text());
+                }
+                updateImuActivity(await response.json());
+            } catch (error) {
+                console.error("刷新 IMU 活动识别失败", error);
+            } finally {
+                imuActivityLoading = false;
+            }
+        }
+
+        async function loadPlaybackImuActivity(targetTime, force = false) {
+            if (imuActivityLoading) {
+                return;
+            }
+            const now = Date.now();
+            if (!force && now - lastPlaybackImuUpdateAt < 500) {
+                return;
+            }
+            imuActivityLoading = true;
+            lastPlaybackImuUpdateAt = now;
+            try {
+                const params = new URLSearchParams({ timestamp: targetTime.toISOString() });
+                const response = await fetch(`/analysis/imu-activity?${params.toString()}`);
+                if (!response.ok) {
+                    throw new Error(await response.text());
+                }
+                updateImuActivity(await response.json());
+            } catch (error) {
+                console.error("加载历史 IMU 活动识别失败", error);
+            } finally {
+                imuActivityLoading = false;
+            }
+        }
+
         async function loadPlaybackState() {
             if (playbackLoading) {
                 return;
@@ -822,6 +1082,7 @@
             updatePlaybackLabels(targetTime);
             playbackMode = true;
             setPlaybackStatus("回溯模式：加载中...");
+            enterPlaybackCameraMode("历史帧加载中...");
 
             try {
                 const params = new URLSearchParams({ timestamp: targetTime.toISOString() });
@@ -832,15 +1093,24 @@
                 const state = await response.json();
                 updateLatest(state.environment);
                 updateMotion(state.motion);
+                loadPlaybackImuActivity(targetTime, true);
                 updateEnvironmentAnalysisFromPayload({
                     metrics: state.environment.metrics,
                     analysis: analyzeEnvironmentMetrics(state.environment.metrics),
                 });
 
                 if (state.camera_video?.available) {
-                    showPlaybackVideo(state.camera_video, state.target_time);
+                    if (playbackPlaying) {
+                        const videoReady = await startPlaybackCameraStream(state.camera_video, state.target_time);
+                        if (!videoReady) {
+                            playbackPlaying = false;
+                        }
+                    } else {
+                        loadPlaybackCameraFrame(targetTime, true);
+                    }
                 } else {
                     showCameraImage(buildCameraPlaceholder("该时间附近暂无历史视频片段"), "该时间附近暂无历史视频片段");
+                    playbackPlaying = false;
                 }
                 setPlaybackStatus(`回溯模式：${formatTime(state.target_time)}`);
             } catch (error) {
@@ -851,33 +1121,49 @@
             }
         }
 
-        async function loadPlaybackSensors() {
-            if (!playbackMode || playbackSensorsLoading) {
+        async function loadPlaybackMotion() {
+            if (!playbackMode || playbackMotionLoading) {
                 return;
             }
-            playbackSensorsLoading = true;
+            playbackMotionLoading = true;
             const targetTime = getPlaybackTargetTime();
-            updatePlaybackLabels(targetTime);
             try {
                 const params = new URLSearchParams({ timestamp: targetTime.toISOString() });
-                const response = await fetch(`/timeline/sensors?${params.toString()}`);
+                const response = await fetch(`/timeline/motion?${params.toString()}`);
                 if (!response.ok) {
                     throw new Error(await response.text());
                 }
-                const state = await response.json();
-                updateLatest(state.environment);
-                updateMotion(state.motion);
-                updateEnvironmentAnalysisFromPayload({
-                    metrics: state.environment.metrics,
-                    analysis: analyzeEnvironmentMetrics(state.environment.metrics),
-                });
-                if (playbackPlaying) {
-                    setPlaybackStatus(`回溯播放：${formatTime(state.target_time)}`);
-                }
+                updateMotion(await response.json());
+                loadPlaybackImuActivity(targetTime);
             } catch (error) {
-                console.error("加载历史传感器状态失败", error);
+                console.error("加载历史 WT901 运动状态失败", error);
             } finally {
-                playbackSensorsLoading = false;
+                playbackMotionLoading = false;
+            }
+        }
+
+        async function loadPlaybackEnvironment() {
+            if (!playbackMode || playbackEnvironmentLoading) {
+                return;
+            }
+            playbackEnvironmentLoading = true;
+            const targetTime = getPlaybackTargetTime();
+            try {
+                const params = new URLSearchParams({ timestamp: targetTime.toISOString() });
+                const response = await fetch(`/timeline/environment?${params.toString()}`);
+                if (!response.ok) {
+                    throw new Error(await response.text());
+                }
+                const environment = await response.json();
+                updateLatest(environment);
+                updateEnvironmentAnalysisFromPayload({
+                    metrics: environment.metrics,
+                    analysis: analyzeEnvironmentMetrics(environment.metrics),
+                });
+            } catch (error) {
+                console.error("加载历史环境状态失败", error);
+            } finally {
+                playbackEnvironmentLoading = false;
             }
         }
 
@@ -891,50 +1177,77 @@
         }
 
         function stopPlaybackAutoRun() {
-            if (playbackPlayTimer) {
-                window.clearInterval(playbackPlayTimer);
-                playbackPlayTimer = null;
+            if (playbackClockTimer) {
+                window.clearInterval(playbackClockTimer);
+                playbackClockTimer = null;
             }
-            if (playbackEnvironmentTimer) {
-                window.clearInterval(playbackEnvironmentTimer);
-                playbackEnvironmentTimer = null;
+            if (playbackCameraTimer) {
+                window.clearInterval(playbackCameraTimer);
+                playbackCameraTimer = null;
             }
             if (playbackMotionTimer) {
                 window.clearInterval(playbackMotionTimer);
                 playbackMotionTimer = null;
+            }
+            if (playbackEnvironmentTimer) {
+                window.clearInterval(playbackEnvironmentTimer);
+                playbackEnvironmentTimer = null;
             }
             playbackPlaying = false;
             setPlaybackToggleLabel();
             document.getElementById("camera-video").pause();
         }
 
-        function startPlaybackAutoRun() {
+        function startPlaybackTimers() {
             const slider = document.getElementById("playback-slider");
-            playbackMode = true;
-            playbackPlaying = true;
-            setPlaybackToggleLabel();
-            loadPlaybackState();
-            playbackPlayTimer = window.setInterval(() => {
+            if (playbackClockTimer) {
+                return;
+            }
+            playbackClockTimer = window.setInterval(() => {
                 const nextValue = Math.min(Number(slider.value) + PLAYBACK_STEP_SECONDS, Number(slider.max));
                 slider.value = String(nextValue.toFixed(1));
                 const targetTime = getPlaybackTargetTime();
                 updatePlaybackLabels(targetTime);
-                updateCameraPlaybackStatus(targetTime.toISOString());
+                setPlaybackStatus(`回溯播放：${formatTime(targetTime.toISOString())}`);
                 if (nextValue >= Number(slider.max)) {
                     stopPlaybackAutoRun();
                     loadPlaybackState();
                     setPlaybackStatus("回溯播放已到达实时边界");
                 }
             }, PLAYBACK_TICK_MS);
-            playbackMotionTimer = window.setInterval(loadPlaybackSensors, 100);
-            playbackEnvironmentTimer = window.setInterval(loadPlaybackSensors, 5000);
+            playbackCameraTimer = window.setInterval(() => {
+                const targetTime = getPlaybackTargetTime();
+                updateCameraPlaybackStatus(targetTime);
+            }, CAMERA_STREAM_CHECK_MS);
+            playbackMotionTimer = window.setInterval(loadPlaybackMotion, 100);
+            // 树莓派真实节点约 5 秒上传一次；这里每秒查询一次，能及时捕捉到下一条历史样本。
+            playbackEnvironmentTimer = window.setInterval(loadPlaybackEnvironment, 1000);
+        }
+
+        async function startPlaybackAutoRun() {
+            stopPlaybackAutoRun();
+            playbackMode = true;
+            playbackPlaying = true;
+            setPlaybackToggleLabel();
+            document.getElementById("playback-toggle-button").disabled = true;
+            setPlaybackStatus(`正在定位历史视频：${formatTime(getPlaybackTargetTime().toISOString())}`);
+            await loadPlaybackState();
+            document.getElementById("playback-toggle-button").disabled = false;
+            if (!playbackPlaying) {
+                setPlaybackToggleLabel();
+                return;
+            }
+            startPlaybackTimers();
+            setPlaybackToggleLabel();
         }
 
         function togglePlaybackAutoRun() {
             if (playbackPlaying) {
                 stopPlaybackAutoRun();
                 setPlaybackStatus(`回溯已暂停：${formatTime(getPlaybackTargetTime().toISOString())}`);
-                loadPlaybackState();
+                loadPlaybackCameraFrame(getPlaybackTargetTime(), true);
+                loadPlaybackMotion();
+                loadPlaybackEnvironment();
                 return;
             }
             startPlaybackAutoRun();
@@ -944,6 +1257,9 @@
             // 回到实时模式后恢复 MJPEG 实时流，并重新启动常规数据刷新逻辑。
             stopPlaybackAutoRun();
             playbackMode = false;
+            cameraFrameRequestId += 1;
+            cameraPlaybackMode = false;
+            cameraStreamSegmentKey = null;
             initializePlaybackTimeline();
             setPlaybackToggleLabel();
             showCameraImage(`/video_feed?cache=${Date.now()}`, "本地 USB 摄像头");
@@ -957,17 +1273,20 @@
         document.getElementById("dataset-query-button").addEventListener("click", queryDatasetSummary);
         document.getElementById("dataset-export-button").addEventListener("click", exportAlignedDataset);
         document.getElementById("playback-slider").addEventListener("input", schedulePlaybackStateLoad);
-        document.getElementById("playback-window-button").addEventListener("click", jumpToPlaybackHourWindow);
+        document.getElementById("playback-window-button").addEventListener("click", jumpToPlaybackMinuteWindow);
         document.getElementById("playback-toggle-button").addEventListener("click", togglePlaybackAutoRun);
         document.getElementById("playback-live-button").addEventListener("click", returnToLiveMode);
         document.getElementById("history-range-select").addEventListener("change", refreshEnvironmentDashboard);
         setPlaybackToggleLabel();
         refreshEnvironmentDashboard();
         refreshMotionDashboard();
+        refreshImuActivityDashboard();
         // 温湿度和历史图每 5 秒刷新一次。
         setInterval(refreshEnvironmentDashboard, 5000);
         // WT901 默认回传速率约 10Hz，因此页面按 100ms 刷新一次即可。
         setInterval(refreshMotionDashboard, 100);
+        // 活动识别基于约 1.2 秒滑动窗口，300ms 刷新一次，降低动作切换后的显示延迟。
+        setInterval(refreshImuActivityDashboard, 300);
         // 实时模式下，时间轴按当前整点小时段每秒向前推进。
         setInterval(updateRealtimeTimeline, 1000);
         // 窗口尺寸变化时同步调整图表大小。
