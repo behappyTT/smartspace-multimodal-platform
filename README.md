@@ -5,7 +5,7 @@
 当前支持三类设备：
 
 - 摄像头（usb接入）
-- 树莓派环境采集节点（树莓派5主板：https://www.yahboom.com/study/raspberry5提取码：erwp
+- 树莓派环境采集节点（树莓派5主板：https://www.yahboom.com/study/raspberry5 提取码：erwp
                     Gravity五合一环境传感器：https://www.dfrobot.com.cn/goods-3454.html）
 - WT901 蓝牙采集节点（wt901协议：https://wit-motion.yuque.com/wumwnr/ltst03/bg5o5gymbkriihep
                     示例代码：https://wit-motion.yuque.com/wumwnr/ltst03/stpd3x5zp7075l8g）
