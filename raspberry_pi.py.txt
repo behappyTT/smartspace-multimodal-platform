@@ -1,0 +1,144 @@
+# -*- coding: utf-8 -*-
+import time
+import json
+from datetime import datetime, timezone, timedelta
+
+import paho.mqtt.client as mqtt
+from dfrobot_environmental_sensor import EnvironmentalSensor, Units, UVSensor
+
+# =========================
+# MQTT 配置
+# =========================
+BROKER_HOST = "10.5.85.81"  # ip
+BROKER_PORT = 1883
+TOPIC = "smartspace/sensor/upload/rpi01"
+
+# =========================
+# 设备配置
+# =========================
+DEVICE_ID = 2
+DEVICE_TYPE = "sensor_node"
+
+I2C_BUS = 1
+I2C_ADDRESS = 0x22
+
+# 传感器版本：LTR390UV 是新版，S12DS 是旧版
+UV_VARIANT = UVSensor.LTR390UV
+
+# 上传间隔
+UPLOAD_INTERVAL_SECONDS = 5
+
+# 时区东八区
+UTC8 = timezone(timedelta(hours=8))
+
+
+def now_iso():
+    """生成带时区的ISO时间"""
+    return datetime.now(UTC8).isoformat()
+
+
+def make_payload(data):
+    """组装后端标准格式JSON"""
+    return {
+        "device_id": DEVICE_ID,
+        "device_type": DEVICE_TYPE,
+        "timestamp": now_iso(),
+        "metrics": [
+            {"sensor_type": "temperature", "value": data["temperature"], "unit": "C"},
+            {"sensor_type": "humidity", "value": data["humidity"], "unit": "%"},
+            {"sensor_type": "pressure", "value": data["pressure"], "unit": "hPa"},
+            {"sensor_type": "altitude", "value": data["altitude"], "unit": "m"},
+            {"sensor_type": "ultraviolet", "value": data["ultraviolet"], "unit": "mW/cm2"},
+            {"sensor_type": "illuminance", "value": data["illuminance"], "unit": "lx"},
+        ]
+    }
+
+
+def read_environment(sensor):
+    """读取所有6项环境数据"""
+    temperature = sensor.read_temperature(Units.C)
+    humidity = sensor.read_humidity()
+    pressure = sensor.read_pressure(Units.HPA)
+    altitude = sensor.estimate_altitude()
+    ultraviolet = sensor.read_uv_irradiance()
+    illuminance = sensor.read_illuminance()
+
+    return {
+        "temperature": round(float(temperature), 2),
+        "humidity": round(float(humidity), 2),
+        "pressure": round(float(pressure), 2),
+        "altitude": round(float(altitude), 2),
+        "ultraviolet": round(float(ultraviolet), 4),
+        "illuminance": round(float(illuminance), 2),
+    }
+
+
+def create_mqtt_client():
+    """兼容paho-mqtt 1.x/2.x 双版本，无警告"""
+    try:
+        return mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+    except AttributeError:
+        return mqtt.Client()
+
+
+def main():
+    # 初始化传感器
+    sensor = EnvironmentalSensor.i2c(
+        bus=I2C_BUS,
+        address=I2C_ADDRESS,
+        uv_sensor=UV_VARIANT,
+    )
+
+    # 等待传感器就绪（带异常捕获）
+    print("Waiting for environmental sensor...")
+    while True:
+        try:
+            if sensor.is_present():
+                break
+        except:
+            pass
+        print("Sensor initialize failed!! Retrying...")
+        time.sleep(1)
+    print("Sensor initialize success!!")
+
+    # MQTT连接
+    client = create_mqtt_client()
+    print(f"Connecting to MQTT broker: {BROKER_HOST}:{BROKER_PORT}")
+
+    try:
+        client.connect(BROKER_HOST, BROKER_PORT, 60)
+        client.loop_start()
+    except Exception as e:
+        print(f"MQTT connect error: {e}")
+        return
+
+    print("MQTT connected successfully")
+
+    # 主循环
+    try:
+        while True:
+            try:
+                # 读取数据
+                data = read_environment(sensor)
+                payload = make_payload(data)
+                payload_str = json.dumps(payload, ensure_ascii=False)
+
+                # 发布消息
+                client.publish(TOPIC, payload_str)
+                print("Published:", payload_str)
+
+            except Exception as e:
+                print(f"Read/publish error: {e}")
+
+            time.sleep(UPLOAD_INTERVAL_SECONDS)
+
+    except KeyboardInterrupt:
+        print("\n程序退出")
+
+    finally:
+        client.loop_stop()
+        client.disconnect()
+
+
+if __name__ == "__main__":
+    main()
